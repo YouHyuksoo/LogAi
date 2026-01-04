@@ -501,7 +501,7 @@ export default function ChatPage() {
                   {/* Timestamp */}
                   {isClient && (
                     <span className="text-[10px] opacity-50 ml-auto">
-                      {msg.timestamp.toLocaleTimeString("ko-KR")}
+                      {new Date(msg.timestamp).toLocaleTimeString("ko-KR")}
                     </span>
                   )}
                 </div>
