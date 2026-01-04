@@ -5,14 +5,27 @@
  * 사용자가 처음 접속했을 때 보여지는 소개 페이지로,
  * 주요 기능 설명과 대시보드로 이동하는 CTA 버튼을 제공합니다.
  *
+ * 주요 섹션:
+ * 1. **히어로 섹션**: 메인 타이틀, 서브타이틀, CTA 버튼, 기술 스택 배지
+ * 2. **통계 섹션**: 로그 처리량, 레이턴시, 정확도 지표
+ * 3. **기능 카드 섹션**: 실시간 모니터링, AI 분석, RAG 검색, 알림 기능
+ * 4. **핵심 장점 섹션**: 온프레미스, GPU 가속, 지능형 워크플로우
+ * 5. **아키텍처 다이어그램**: 시스템 구성도 (데스크톱/모바일 반응형)
+ * 6. **CTA 섹션**: Docker Compose 배포 명령어 및 시작 버튼
+ * 7. **푸터**: 빠른 링크, 기술 스택, 카피라이트
+ *
  * 초보자 가이드:
- * 1. **useI18n()**: 다국어 번역 함수를 사용합니다
- * 2. **features**: 주요 기능 4가지를 카드로 표시합니다
- * 3. **stats**: 성능 지표를 표시합니다
- * 4. **CTA 버튼**: /dashboard로 이동합니다
+ * - **useI18n()**: 다국어 번역 함수 (ko, en, ja 지원)
+ * - **useTheme()**: 라이트/다크 테마 전환
+ * - **framer-motion**: 스크롤 및 진입 애니메이션 효과
+ * - **features[]**: 기능 카드 데이터 배열 수정 시 이곳
+ * - **techStack[]**: 기술 스택 배지 수정 시 이곳
  *
  * @example
  * 접속 URL: http://localhost:3000/
+ *
+ * @see frontend/lib/i18n.ts - 다국어 번역 키 정의
+ * @see frontend/lib/theme.tsx - 테마 컨텍스트 정의
  */
 
 "use client";
@@ -35,6 +48,11 @@ import {
   Sun,
   Moon,
   Globe,
+  ChevronDown,
+  Shield,
+  Cpu,
+  Database,
+  GitBranch,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useState } from "react";
@@ -91,8 +109,27 @@ export default function LandingPage() {
     { code: "ja", label: "日本語", flag: "🇯🇵" },
   ];
 
+  // 기술 스택 데이터
+  const techStack = [
+    { name: "Python", icon: "🐍" },
+    { name: "FastAPI", icon: "⚡" },
+    { name: "LangGraph", icon: "🔗" },
+    { name: "vLLM", icon: "🧠" },
+    { name: "Next.js", icon: "▲" },
+    { name: "ClickHouse", icon: "🏠" },
+    { name: "Qdrant", icon: "📦" },
+    { name: "Docker", icon: "🐳" },
+  ];
+
   return (
-    <div className={`min-h-screen ${theme === "dark" ? "bg-gray-950 text-white" : "bg-gray-50 text-gray-900"}`}>
+    <div className={`min-h-screen ${theme === "dark" ? "bg-gray-950 text-white" : "bg-gray-50 text-gray-900"} overflow-x-hidden`}>
+      {/* 배경 그라데이션 효과 */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className={`absolute top-0 left-1/4 w-[500px] h-[500px] rounded-full blur-[120px] ${theme === "dark" ? "bg-blue-500/10" : "bg-blue-500/5"}`} />
+        <div className={`absolute top-1/3 right-1/4 w-[400px] h-[400px] rounded-full blur-[120px] ${theme === "dark" ? "bg-purple-500/10" : "bg-purple-500/5"}`} />
+        <div className={`absolute bottom-1/4 left-1/3 w-[300px] h-[300px] rounded-full blur-[100px] ${theme === "dark" ? "bg-cyan-500/10" : "bg-cyan-500/5"}`} />
+      </div>
+
       {/* 헤더 */}
       <header className={`fixed top-0 left-0 right-0 z-50 ${theme === "dark" ? "bg-gray-950/80" : "bg-white/80"} backdrop-blur-lg border-b ${theme === "dark" ? "border-gray-800" : "border-gray-200"}`}>
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
@@ -194,11 +231,47 @@ export default function LandingPage() {
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Link
                 href="/dashboard"
-                className="flex items-center gap-2 px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold text-lg transition-all hover:scale-105 shadow-lg shadow-blue-500/25"
+                className="group flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl font-semibold text-lg transition-all hover:scale-105 shadow-lg shadow-blue-500/25"
               >
                 {t("landing.cta")}
-                <ArrowRight className="h-5 w-5" />
+                <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
               </Link>
+              <a
+                href="#architecture"
+                className={`flex items-center gap-2 px-6 py-4 rounded-xl font-medium transition-all ${
+                  theme === "dark"
+                    ? "bg-gray-800 hover:bg-gray-700 text-gray-300"
+                    : "bg-gray-200 hover:bg-gray-300 text-gray-700"
+                }`}
+              >
+                {t("landing.learnMore") || "자세히 보기"}
+                <ChevronDown className="h-4 w-4" />
+              </a>
+            </div>
+
+            {/* 기술 스택 배지 */}
+            <div className="mt-12">
+              <p className={`text-sm mb-4 ${theme === "dark" ? "text-gray-500" : "text-gray-400"}`}>
+                Powered by
+              </p>
+              <div className="flex flex-wrap justify-center gap-3">
+                {techStack.map((tech, idx) => (
+                  <motion.div
+                    key={idx}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.5 + idx * 0.05 }}
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm ${
+                      theme === "dark"
+                        ? "bg-gray-800/50 text-gray-400 border border-gray-700"
+                        : "bg-white text-gray-600 border border-gray-200 shadow-sm"
+                    }`}
+                  >
+                    <span>{tech.icon}</span>
+                    <span>{tech.name}</span>
+                  </motion.div>
+                ))}
+              </div>
             </div>
           </motion.div>
 
@@ -256,8 +329,53 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* 핵심 장점 섹션 */}
+      <section className="py-16 px-6">
+        <div className="max-w-6xl mx-auto">
+          <motion.div
+            initial={{ opacity: 0 }}
+            whileInView={{ opacity: 1 }}
+            viewport={{ once: true }}
+            className="grid grid-cols-1 md:grid-cols-3 gap-8"
+          >
+            {/* 온프레미스 */}
+            <div className={`text-center p-8 rounded-2xl ${theme === "dark" ? "bg-gray-900/30" : "bg-white/50"}`}>
+              <div className={`inline-flex p-4 rounded-2xl mb-4 ${theme === "dark" ? "bg-green-500/10" : "bg-green-100"}`}>
+                <Shield className="h-8 w-8 text-green-500" />
+              </div>
+              <h3 className="text-xl font-bold mb-2">{t("landing.benefits.onpremise.title") || "완전한 온프레미스"}</h3>
+              <p className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+                {t("landing.benefits.onpremise.desc") || "모든 데이터가 사내에서 처리됩니다. 외부 API 호출 없이 완전한 데이터 주권을 보장합니다."}
+              </p>
+            </div>
+
+            {/* GPU 가속 */}
+            <div className={`text-center p-8 rounded-2xl ${theme === "dark" ? "bg-gray-900/30" : "bg-white/50"}`}>
+              <div className={`inline-flex p-4 rounded-2xl mb-4 ${theme === "dark" ? "bg-purple-500/10" : "bg-purple-100"}`}>
+                <Cpu className="h-8 w-8 text-purple-500" />
+              </div>
+              <h3 className="text-xl font-bold mb-2">{t("landing.benefits.gpu.title") || "GPU 가속 추론"}</h3>
+              <p className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+                {t("landing.benefits.gpu.desc") || "vLLM을 통한 최적화된 추론으로 실시간 장애 분석이 가능합니다."}
+              </p>
+            </div>
+
+            {/* 자동화 */}
+            <div className={`text-center p-8 rounded-2xl ${theme === "dark" ? "bg-gray-900/30" : "bg-white/50"}`}>
+              <div className={`inline-flex p-4 rounded-2xl mb-4 ${theme === "dark" ? "bg-blue-500/10" : "bg-blue-100"}`}>
+                <GitBranch className="h-8 w-8 text-blue-500" />
+              </div>
+              <h3 className="text-xl font-bold mb-2">{t("landing.benefits.auto.title") || "지능형 워크플로우"}</h3>
+              <p className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+                {t("landing.benefits.auto.desc") || "LangGraph 기반 AI 에이전트가 자동으로 장애를 감지하고 분석합니다."}
+              </p>
+            </div>
+          </motion.div>
+        </div>
+      </section>
+
       {/* 아키텍처 다이어그램 섹션 */}
-      <section className="py-20 px-6">
+      <section id="architecture" className="py-20 px-6 scroll-mt-20">
         <div className="max-w-6xl mx-auto">
           <motion.div
             initial={{ opacity: 0 }}
@@ -596,16 +714,111 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* CTA 섹션 */}
+      <section className="py-20 px-6">
+        <div className="max-w-4xl mx-auto text-center">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className={`p-12 rounded-3xl ${
+              theme === "dark"
+                ? "bg-gradient-to-br from-blue-500/10 via-purple-500/10 to-cyan-500/10 border border-gray-800"
+                : "bg-gradient-to-br from-blue-50 via-purple-50 to-cyan-50 border border-gray-200"
+            }`}
+          >
+            <h2 className="text-3xl md:text-4xl font-bold mb-4">
+              {t("landing.cta.title") || "지금 바로 시작하세요"}
+            </h2>
+            <p className={`text-lg mb-8 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+              {t("landing.cta.desc") || "Docker Compose 한 줄로 전체 스택을 배포할 수 있습니다"}
+            </p>
+
+            {/* 코드 블록 */}
+            <div className={`mb-8 p-4 rounded-xl font-mono text-sm text-left ${
+              theme === "dark" ? "bg-gray-900 text-green-400" : "bg-gray-900 text-green-400"
+            }`}>
+              <span className="text-gray-500">$</span> docker-compose -f docker-compose.prod.yml up -d
+            </div>
+
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-xl font-semibold text-lg transition-all hover:scale-105 shadow-lg shadow-blue-500/25"
+            >
+              {t("landing.cta")}
+              <ArrowRight className="h-5 w-5" />
+            </Link>
+          </motion.div>
+        </div>
+      </section>
+
       {/* 푸터 */}
-      <footer className={`py-8 px-6 border-t ${theme === "dark" ? "border-gray-800 bg-gray-950" : "border-gray-200 bg-white"}`}>
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <Activity className="h-5 w-5 text-blue-500" />
-            <span className="font-semibold">LOG.AI</span>
+      <footer className={`py-12 px-6 border-t ${theme === "dark" ? "border-gray-800 bg-gray-950" : "border-gray-200 bg-white"}`}>
+        <div className="max-w-7xl mx-auto">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
+            {/* 로고 및 설명 */}
+            <div className="md:col-span-2">
+              <div className="flex items-center gap-2 mb-4">
+                <Activity className="h-6 w-6 text-blue-500" />
+                <span className="text-xl font-bold">LOG.AI</span>
+              </div>
+              <p className={`text-sm mb-4 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+                {t("landing.footer.desc") || "온프레미스 자율형 로그 분석 시스템. Drain3 템플릿 추출, PyOD 이상 탐지, RAG 기반 AI 분석을 통해 실시간 장애 감지 및 자동 보고를 수행합니다."}
+              </p>
+            </div>
+
+            {/* 빠른 링크 */}
+            <div>
+              <h4 className={`font-semibold mb-4 ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+                {t("landing.footer.quickLinks") || "바로가기"}
+              </h4>
+              <ul className={`space-y-2 text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+                <li>
+                  <Link href="/dashboard" className="hover:text-blue-500 transition-colors">
+                    {t("sidebar.monitoring") || "모니터링"}
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/analysis" className="hover:text-blue-500 transition-colors">
+                    {t("sidebar.analysis") || "이상 탐지"}
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/chat" className="hover:text-blue-500 transition-colors">
+                    {t("sidebar.aiChat") || "AI 채팅"}
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/settings" className="hover:text-blue-500 transition-colors">
+                    {t("sidebar.settings") || "설정"}
+                  </Link>
+                </li>
+              </ul>
+            </div>
+
+            {/* 기술 스택 */}
+            <div>
+              <h4 className={`font-semibold mb-4 ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
+                {t("landing.footer.techStack") || "기술 스택"}
+              </h4>
+              <ul className={`space-y-2 text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
+                <li>FastAPI + LangGraph</li>
+                <li>Next.js 14 + Tailwind</li>
+                <li>vLLM + Llama 3.1</li>
+                <li>ClickHouse + Qdrant</li>
+              </ul>
+            </div>
           </div>
-          <p className={`text-sm ${theme === "dark" ? "text-gray-500" : "text-gray-500"}`}>
-            © 2024 LogAi. Autonomous AI SRE Solution.
-          </p>
+
+          {/* 하단 카피라이트 */}
+          <div className={`pt-8 border-t ${theme === "dark" ? "border-gray-800" : "border-gray-200"} flex flex-col md:flex-row items-center justify-between gap-4`}>
+            <p className={`text-sm ${theme === "dark" ? "text-gray-500" : "text-gray-500"}`}>
+              © 2024 LogAi. Autonomous AI SRE Solution.
+            </p>
+            <div className={`flex items-center gap-4 text-sm ${theme === "dark" ? "text-gray-500" : "text-gray-500"}`}>
+              <span>Made with ❤️ for SRE Teams</span>
+            </div>
+          </div>
         </div>
       </footer>
     </div>
