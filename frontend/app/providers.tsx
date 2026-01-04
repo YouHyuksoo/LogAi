@@ -16,7 +16,6 @@
 import dynamic from "next/dynamic";
 import { ThemeProvider } from "@/lib/theme";
 import { I18nProvider } from "@/lib/i18n";
-import { VibeKanbanWebCompanion } from "vibe-kanban-web-companion";
 
 /**
  * VibeKanbanWebCompanion 컴포넌트
