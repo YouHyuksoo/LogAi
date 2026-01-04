@@ -1,0 +1,246 @@
+/**
+ * @file app/globals.css
+ * @description
+ * 전역 스타일 및 Tailwind CSS 설정 파일입니다.
+ * 다크/라이트 테마 CSS 변수와 유틸리티 클래스를 정의합니다.
+ *
+ * 초보자 가이드:
+ * 1. **:root**: 다크 모드 기본값 (CSS 변수)
+ * 2. **.light**: 라이트 모드 변수 오버라이드
+ * 3. **유틸리티 클래스**: glass-panel, neon-text 등
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* 다크 모드 (기본값) */
+  :root {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
+  }
+
+  /* 라이트 모드 */
+  .light {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  /* 스크롤바 숨기기 */
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+@layer components {
+  /* 글라스모피즘 패널 - 다크 모드 */
+  .dark .glass-panel {
+    @apply bg-gray-900/50 backdrop-blur-lg border border-gray-700/50 shadow-xl;
+  }
+
+  /* 글라스모피즘 패널 - 라이트 모드 */
+  .light .glass-panel {
+    @apply bg-white/80 backdrop-blur-lg border border-gray-200 shadow-lg;
+  }
+
+  /* 네온 텍스트 효과 (다크 모드 전용) */
+  .dark .neon-text {
+    text-shadow: 0 0 5px hsl(var(--primary)),
+      0 0 10px hsl(var(--primary));
+  }
+
+  /* 네온 보더 효과 (다크 모드 전용) */
+  .dark .neon-border {
+    box-shadow: 0 0 5px hsl(var(--primary));
+  }
+}
+
+@layer utilities {
+  /* ==================== 기본 애니메이션 ==================== */
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease-out;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* ==================== Docker 상태 애니메이션 ==================== */
+
+  /* 1. 펄싱 애니메이션 (실행중인 서비스) */
+  .animate-docker-pulse {
+    animation: dockerPulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  @keyframes dockerPulse {
+    0%, 100% {
+      opacity: 1;
+      box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+    }
+    50% {
+      opacity: 0.9;
+    }
+    75% {
+      box-shadow: 0 0 0 8px rgba(34, 197, 94, 0);
+    }
+  }
+
+  /* 실행중인 아이콘 회전 */
+  .animate-docker-icon-spin {
+    animation: dockerIconSpin 2s linear infinite;
+  }
+
+  @keyframes dockerIconSpin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* 실행중인 아이콘 바운스 */
+  .animate-docker-icon-bounce {
+    animation: dockerIconBounce 1.5s ease-in-out infinite;
+  }
+
+  @keyframes dockerIconBounce {
+    0%, 100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-3px);
+    }
+  }
+
+  /* 2. 스핀 애니메이션 (로딩 중인 서비스) */
+  .animate-docker-spin {
+    animation: dockerSpin 2s linear infinite;
+  }
+
+  @keyframes dockerSpin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* 3. 슬라이드인 애니메이션 */
+  .animate-docker-slide-in {
+    animation: dockerSlideIn 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  @keyframes dockerSlideIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* 4. 깜빡임 애니메이션 (중지된 서비스) */
+  .animate-docker-blink {
+    animation: dockerBlink 1.5s ease-in-out infinite;
+  }
+
+  @keyframes dockerBlink {
+    0%, 100% {
+      opacity: 0.6;
+    }
+    50% {
+      opacity: 0.3;
+    }
+  }
+
+  /* 5. 호버 스케일 효과 */
+  .docker-card-hover {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .docker-card-hover:hover {
+    transform: translateY(-4px) scale(1.05);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
+  }
+
+  /* 그라데이션 텍스트 */
+  .gradient-text {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-purple-500;
+  }
+}

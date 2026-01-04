@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # 5. LLM Inference Engine (vLLM)
+  vllm:
+    image: vllm/vllm-openai:latest
+    container_name: vllm
+    runtime: nvidia
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    ports:
+      - 8000:8000
+    command: "--model ${LLM_MODEL_NAME:-meta-llama/Meta-Llama-3.1-8B-Instruct} --gpu-memory-utilization 0.7 --max-model-len 4096"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - logai-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+  # 6. Embedding Engine (TEI)
+  tei:
+    image: ghcr.io/huggingface/text-embeddings-inference:1.2
+    container_name: tei
+    runtime: nvidia
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN}
+    volumes:
+      - ./data/tei:/data
+    ports:
+      - 8080:80
+    command: --model-id BAAI/bge-m3 --port 80
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - logai-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  logai-net:
+    external: true
+    name: logai_logai-net  # docker-compose.yml에서 생성된 네트워크 사용

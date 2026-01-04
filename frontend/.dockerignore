@@ -1,0 +1,53 @@
+# Node 모듈 (Dockerfile에서 재설치)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Next.js 빌드 출력
+.next/
+out/
+
+# 프로덕션 빌드
+/build
+
+# 환경 변수 (보안)
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE 설정
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 테스트
+coverage/
+.nyc_output
+
+# OS 파일
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Docker 관련
+Dockerfile
+.dockerignore
+
+# Vercel
+.vercel
+
+# TypeScript 빌드 정보
+*.tsbuildinfo
+next-env.d.ts
+
+# 문서
+README.md
+*.md

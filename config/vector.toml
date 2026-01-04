@@ -1,0 +1,137 @@
+# =============================================================================
+# @file config/vector.toml
+# @description
+# Vector 로그 수집기 설정 파일입니다.
+# 커스텀 데모 로그를 생성하여 Redpanda(Kafka)로 전송합니다.
+#
+# 초보자 가이드:
+# 1. **sources**: 로그 입력 소스 정의
+# 2. **transforms**: 로그 변환/필터링
+# 3. **sinks**: 로그 출력 대상 (Redpanda, 콘솔)
+#
+# 로그 형식 수정:
+# - [sources.custom_logs].lines 배열에 원하는 로그 메시지 추가
+# - [transforms.enrich_logs].source에서 필드 가공
+#
+# 테스트 방법:
+# 1. docker-compose up -d (인프라 실행)
+# 2. run_vector.bat (로그 생성 시작)
+# 3. run_consumer.bat (로그 수신 및 저장)
+# =============================================================================
+
+# =============================================================================
+# 소스 설정: 커스텀 로그 생성
+# =============================================================================
+# 원하는 로그 메시지를 lines 배열에 추가하면 됩니다
+# Vector가 순차적으로 하나씩 전송합니다
+# =============================================================================
+[sources.custom_logs]
+type = "demo_logs"
+format = "shuffle"
+interval = 30.0  # 30초마다 로그 생성
+lines = [
+  # =============================================================================
+  # NPM SMT 마운터 장비 로그 (Panasonic NPM Series)
+  # 형식: MachineNumber | EventCode | EventMainMessage | EventSubMessage
+  # =============================================================================
+
+  # ============ PCB 반입/반출 (EventCode: 6, 7) ============
+  '{"level": "INFO", "service": "NPM/AM-01", "message": "PCB carrying in Stage=null Current PCB position=Front conveyor Lane=Lane2 Previous position=pre process PCB serial=25580"}',
+  '{"level": "INFO", "service": "NPM/AM-01", "message": "PCB carrying out Stage=null Current PCB position=post process Lane=Lane2 Previous position=No1 mount position PCB serial=25579"}',
+  '{"level": "INFO", "service": "NPM/AM-02", "message": "PCB carrying in Stage=null Current PCB position=No1 mount position Lane=Lane2 Previous position=Front conveyor PCB serial=25573"}',
+  '{"level": "INFO", "service": "NPM/AM-03", "message": "PCB carrying out Stage=null Current PCB position=post process Lane=Lane2 Previous position=No1 mount position PCB serial=25570"}',
+  '{"level": "INFO", "service": "NPM/AM-04", "message": "PCB carrying in Stage=null Current PCB position=Front conveyor Lane=Lane2 Previous position=pre process PCB serial=25567"}',
+  '{"level": "INFO", "service": "NPM/AM-05", "message": "PCB carrying in Stage=null Current PCB position=No1 mount position Lane=Lane2 Previous position=Front conveyor PCB serial=25563"}',
+
+  # ============ 보드 사용 가능 (EventCode: 28) ============
+  '{"level": "INFO", "service": "NPM/AM-01", "message": "Board available Stage=01 Lane=Lane2 BA=ON PCB serial=0"}',
+  '{"level": "INFO", "service": "NPM/AM-02", "message": "Board available Stage=01 Lane=Lane2 BA=OFF PCB serial=0"}',
+  '{"level": "INFO", "service": "NPM/AM-03", "message": "Board available Stage=01 Lane=Lane2 BA=ON PCB serial=0"}',
+  '{"level": "INFO", "service": "NPM/AM-04", "message": "Board available Stage=01 Lane=Lane2 BA=OFF PCB serial=0"}',
+
+  # ============ 생산 시작/종료 (EventCode: 8, 4) ============
+  '{"level": "INFO", "service": "NPM/AM-01", "message": "Product 1board start Stage=01 Current PCB position=No1 mount position Lane=Lane2 Panel Count=130 PCB serial=25579 Lot=T_MO_BOT_EBR86881852"}',
+  '{"level": "INFO", "service": "NPM/AM-02", "message": "Product 1board end Stage=01 Current PCB position=No1 mount position Lane=Lane2 Panel Count=128 PCB serial=25573 CycleTime1=28.79 CycleTime2=30.00 Lot=T_MO_BOT_EBR86881852"}',
+  '{"level": "INFO", "service": "NPM/AM-03", "message": "Product 1board start Stage=01 Current PCB position=No1 mount position Lane=Lane2 Panel Count=127 PCB serial=25570 Lot=T_MO_BOT_EBR86881852"}',
+  '{"level": "INFO", "service": "NPM/AM-04", "message": "Product 1board end Stage=01 Current PCB position=No1 mount position Lane=Lane2 Panel Count=125 PCB serial=25566 CycleTime1=28.82 CycleTime2=31.62 Lot=T_MO_BOT_EBR86881852"}',
+  '{"level": "INFO", "service": "NPM/AM-05", "message": "Product 1board start Stage=01 Current PCB position=No1 mount position Lane=Lane2 Panel Count=124 PCB serial=25563 Lot=T_MO_BOT_EBR86881852"}',
+
+  # ============ PCB 인식 상태 (EventCode: 3) ============
+  '{"level": "INFO", "service": "NPM/AM-02", "message": "PCB recognition status Go PCB recognition Stage=01 Lane=Lane2 Location=Whole MC PCB serial=25573"}',
+  '{"level": "INFO", "service": "NPM/AM-03", "message": "PCB recognition status Exit from PCB recognition Stage=01 Lane=Lane2 Location=Whole MC PCB serial=25570"}',
+  '{"level": "INFO", "service": "NPM/AM-06", "message": "PCB recognition status Go PCB recognition Stage=01 Lane=Lane2 Location=Whole MC PCB serial=25560"}',
+  '{"level": "INFO", "service": "NPM/AM-07", "message": "PCB recognition status Exit from PCB recognition Stage=01 Lane=Lane2 Location=Whole MC PCB serial=25557"}',
+
+  # ============ 공정 대기 (EventCode: 12, 13) ============
+  '{"level": "WARN", "service": "NPM/AM-01", "message": "Wait for post process Start at Wait Stage=01 Lane=Lane2 Location=Whole MC PCB serial=25579"}',
+  '{"level": "INFO", "service": "NPM/AM-01", "message": "Wait for post process Exit Wait Stage=01 Lane=Lane2 Location=Whole MC PCB serial=25578"}',
+  '{"level": "WARN", "service": "NPM/AM-08", "message": "Wait for pre process Start at Wait Stage=01 Lane=Lane2 Location=Whole MC PCB serial=0"}',
+  '{"level": "INFO", "service": "NPM/AM-08", "message": "Wait for pre process Exit Wait Stage=01 Lane=Lane2 Location=Whole MC PCB serial=0"}',
+
+  # ============ 인식 오류 (EventCode: 3, SubCode: 320000) - ERROR ============
+  '{"level": "ERROR", "service": "NPM/AM-06", "message": "Recog error Stage=01 Head=02 Nozzle position=07 Nozzle No=00235 Feeder address=0020003 Lane=Lane2 Turn No=13 PCB serial=25559 ANS=020 ANSSUB=10"}',
+  '{"level": "ERROR", "service": "NPM/AM-03", "message": "Recog error Stage=01 Head=01 Nozzle position=03 Nozzle No=00142 Feeder address=0010002 Lane=Lane2 Turn No=8 PCB serial=25568 ANS=015 ANSSUB=05"}',
+  '{"level": "ERROR", "service": "NPM/AM-09", "message": "Recog error Stage=01 Head=02 Nozzle position=05 Nozzle No=00189 Feeder address=0030001 Lane=Lane2 Turn No=21 PCB serial=25564 ANS=022 ANSSUB=12"}',
+
+  # ============ 단독 정지 (EventCode: 3, SubCode: 140000/140001) ============
+  '{"level": "WARN", "service": "NPM/AM-09", "message": "Single stop Exit Single stop Stage=01 Lane=Lane2 Location=Whole MC PCB serial=25564"}',
+  '{"level": "INFO", "service": "NPM/AM-09", "message": "Resume from Single stop or Cycle stop Stage=01 Lane=Lane2 Location=Whole MC PCB serial=25564"}',
+
+  # ============ 신호탑/버저 상태 (EventCode: 50) ============
+  '{"level": "INFO", "service": "NPM/AM-09", "message": "Signal tower status Stage=01 Lane=Lane2 Red=OFF Yellow=OFF Green=ON Buzzer=OFF"}',
+  '{"level": "WARN", "service": "NPM/AM-06", "message": "Signal tower status Stage=01 Lane=Lane2 Red=OFF Yellow=ON Green=OFF Buzzer=ON"}',
+  '{"level": "ERROR", "service": "NPM/AM-03", "message": "Signal tower status Stage=01 Lane=Lane2 Red=ON Yellow=OFF Green=OFF Buzzer=ON"}',
+
+  # ============ 화면 전환/버튼 조작 (EventCode: 31, 33) ============
+  '{"level": "INFO", "service": "NPM/AM-09", "message": "Screen change Stage=01 Screen code=Remain Monitor Machine Screen"}',
+  '{"level": "INFO", "service": "NPM/AM-09", "message": "Button operation Stage=01 Screen code=Pickup Position Recognition Error Screen Button code=00D2"}',
+
+  # ============ 자동 허가 확인 (EventCode: 27) ============
+  '{"level": "INFO", "service": "NPM/AM-09", "message": "Auto permission confirmation Auto permission OK Stage=01 Lane=Lane2"}',
+]
+
+# =============================================================================
+# 변환 설정: JSON 파싱 및 타임스탬프 추가
+# =============================================================================
+[transforms.parse_json]
+type = "remap"
+inputs = ["custom_logs"]
+source = '''
+# JSON 문자열을 파싱
+parsed = parse_json!(.message)
+
+# 필드 할당
+.level = parsed.level
+.service = parsed.service
+.message = parsed.message
+
+# 타임스탬프 추가
+.timestamp = to_string(now())
+'''
+
+# =============================================================================
+# 싱크 설정: Redpanda (Kafka 호환)
+# =============================================================================
+[sinks.redpanda]
+type = "kafka"
+inputs = ["parse_json"]
+bootstrap_servers = "localhost:29092"  # 로컬 개발환경 (Docker 외부 포트)
+topic = "logs-raw"
+encoding.codec = "json"
+
+# Kafka 프로듀서 설정
+compression = "gzip"
+batch.max_bytes = 1048576  # 1MB
+
+# 재시도 설정
+buffer.type = "memory"
+buffer.max_events = 500
+buffer.when_full = "block"
+
+# =============================================================================
+# 싱크 설정: 콘솔 출력 (디버깅용)
+# =============================================================================
+[sinks.console]
+type = "console"
+inputs = ["parse_json"]
+encoding.codec = "json"

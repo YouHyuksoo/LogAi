@@ -1,0 +1,192 @@
+# ==============================================================================
+# docker-compose.prod.yml
+# ==============================================================================
+# LogAi 프로덕션 환경 Docker Compose 설정 (CPU 전용)
+#
+# 주요 특징:
+# 1. 최적화된 프로덕션 빌드 (코드 변경 즉시 반영 안 됨)
+# 2. Backend: uvicorn 프로덕션 모드 (--reload 없음)
+# 3. Frontend: Next.js standalone 프로덕션 빌드
+# 4. 볼륨 마운트 최소화 (데이터 디렉토리만)
+#
+# 실행 방법:
+#   docker-compose -f docker-compose.prod.yml up -d
+#
+# GPU 포함 실행:
+#   docker-compose -f docker-compose.prod.yml -f docker-compose.ai.yml up -d
+# ==============================================================================
+
+version: '3.8'
+
+services:
+  # 1. Message Broker (Kafka Compatible)
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v23.3.4
+    container_name: redpanda
+    command:
+      - redpanda start
+      - --smp 1
+      - --memory 1G
+      - --reserve-memory 0M
+      - --overprovisioned
+      - --node-id 0
+      - --check=false
+      - --kafka-addr PLAIN://0.0.0.0:9092,OUTSIDE://0.0.0.0:29092
+      - --advertise-kafka-addr PLAIN://redpanda:9092,OUTSIDE://localhost:29092
+      - --pandaproxy-addr 0.0.0.0:8082
+      - --advertise-pandaproxy-addr localhost:8082
+    ports:
+      - 8081:8081   # Schema Registry
+      - 8082:8082   # REST Proxy
+      - 29092:29092 # Kafka API (External)
+      - 9644:9644   # Admin API
+    volumes:
+      - ./data/redpanda:/var/lib/redpanda/data
+    networks:
+      - logai-net
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. OLAP Database (Logs & Stats)
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.1
+    container_name: clickhouse
+    ports:
+      - 8123:8123 # HTTP
+      - 9000:9000 # Native
+    volumes:
+      - ./data/clickhouse:/var/lib/clickhouse
+      - ./config/clickhouse_users.xml:/etc/clickhouse-server/users.d/users.xml:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    networks:
+      - logai-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 3. Vector Database (RAG)
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+    container_name: qdrant
+    ports:
+      - 6333:6333 # REST API
+      - 6334:6334 # gRPC
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+    networks:
+      - logai-net
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/6333'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 4. Log Collector (Rust Agent)
+  vector:
+    image: timberio/vector:0.36.0-debian
+    container_name: vector
+    volumes:
+      - ./config/vector.toml:/etc/vector/vector.toml:ro
+      - ./data/vector:/var/lib/vector
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - logai-net
+
+  # 5. Backend API (FastAPI) - 프로덕션 모드
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: logai-backend
+    ports:
+      - 8000:8000
+    environment:
+      - REDPANDA_BROKER=redpanda:9092
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - VLLM_URL=http://vllm:8000/v1
+      - TEI_URL=http://tei:8080
+    env_file:
+      - .env
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    networks:
+      - logai-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 6. Log Consumer (Kafka Consumer) - 로그 처리 워커
+  consumer:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: logai-consumer
+    environment:
+      - REDPANDA_BROKER=redpanda:9092
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - VLLM_URL=http://vllm:8000/v1
+      - TEI_URL=http://tei:8080
+    env_file:
+      - .env
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    command: python -m app.services.ingest_consumer
+    networks:
+      - logai-net
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # 7. Frontend (Next.js) - 프로덕션 빌드
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: logai-frontend
+    ports:
+      - 3000:3000
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    networks:
+      - logai-net
+    restart: unless-stopped
+
+networks:
+  logai-net:
+    driver: bridge

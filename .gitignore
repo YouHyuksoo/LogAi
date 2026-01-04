@@ -1,0 +1,160 @@
+# ============================================
+# LogAi 프로젝트 .gitignore
+# Python(FastAPI) + Next.js + Docker 기반
+# ============================================
+
+# ==================== 환경 변수 ====================
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+
+# ==================== Python ====================
+# 가상환경
+venv/
+.venv/
+env/
+ENV/
+
+# 바이트 컴파일 / 캐시
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 배포 / 패키징
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+
+# Drain3 상태 파일
+*.bin
+drain3_state.bin
+
+# ==================== Node.js / Next.js ====================
+node_modules/
+.next/
+out/
+.nuxt/
+dist/
+
+# npm / yarn
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+
+# ==================== IDE / 에디터 ====================
+# VSCode
+.vscode/
+*.code-workspace
+
+# JetBrains (PyCharm, WebStorm)
+.idea/
+*.iml
+*.iws
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# ==================== OS 관련 ====================
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+nul
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Linux
+*~
+
+# ==================== Docker / 인프라 ====================
+# Docker 볼륨 데이터 (로컬 개발용)
+data/
+!data/.gitkeep
+
+# Vector 바이너리
+vector-bin/
+*.zip
+
+# ==================== 로그 / 임시 파일 ====================
+*.log
+logs/
+build.log
+*.tmp
+*.temp
+
+# ==================== 배치 파일 (선택적) ====================
+# 개발용 배치 파일은 유지, 필요시 주석 해제
+# *.bat
+
+# ==================== 기타 ====================
+# 테스트 커버리지
+coverage/
+.nyc_output/
+
+# Storybook
+storybook-static/
+
+# 백업 파일
+*.bak
+*.backup
+
+# 시크릿 / 인증서
+*.pem
+*.key
+*.crt
+credentials.json
+secrets/
