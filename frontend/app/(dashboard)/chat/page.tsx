@@ -53,7 +53,7 @@ export default function ChatPage() {
       role: "assistant",
       content:
         "안녕하세요! 저는 SMD 마운터 설비 전문 AI 분석가입니다. 설비 로그 분석, 이상 징후 감지, Placement/Vision/Feeder 에러 원인 분석을 도와드립니다. 무엇을 도와드릴까요?",
-      timestamp: new Date(),
+      timestamp: new Date().toISOString(),
     },
   ]);
   const [input, setInput] = useState("");
@@ -93,7 +93,7 @@ export default function ChatPage() {
       id: `user-${Date.now()}`,
       role: "user",
       content: input.trim(),
-      timestamp: new Date(),
+      timestamp: new Date().toISOString(),
     };
 
     // 사용자 메시지 추가
@@ -125,7 +125,7 @@ export default function ChatPage() {
         id: `assistant-${Date.now()}`,
         role: "assistant",
         content: response.response,
-        timestamp: new Date(),
+        timestamp: new Date().toISOString(),
         analysisId: response.analysis_id,  // Qdrant 저장용 ID
         savedToQdrant: false,
       };
@@ -137,8 +137,8 @@ export default function ChatPage() {
         const sourcesMessage: ChatMessage = {
           id: `sources-${Date.now()}`,
           role: "system",
-          content: `📚 참조 문서:\n${response.sources.map((s, i) => `${i + 1}. ${s}`).join("\n")}`,
-          timestamp: new Date(),
+          content: `📚 참조 문서:\n${response.sources.map((s: string, i: number) => `${i + 1}. ${s}`).join("\n")}`,
+          timestamp: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, sourcesMessage]);
       }
@@ -151,7 +151,7 @@ export default function ChatPage() {
         id: `error-${Date.now()}`,
         role: "assistant",
         content: `❌ 오류가 발생했습니다: ${err.detail || "서버와 연결할 수 없습니다."}`,
-        timestamp: new Date(),
+        timestamp: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, errorMessage]);
     } finally {

@@ -18,7 +18,8 @@
     "react-markdown": "^10.1.0",
     "recharts": "^2.12.2",
     "remark-gfm": "^4.0.1",
-    "tailwind-merge": "^2.2.1"
+    "tailwind-merge": "^2.2.1",
+    "vibe-kanban-web-companion": "^0.0.5"
   },
   "devDependencies": {
     "@types/node": "^20",
