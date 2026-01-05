@@ -5,13 +5,14 @@ LangGraph 기반 로그 분석 에이전트 워크플로우입니다.
 PyOD 이상 탐지 시 자동으로 실행되어 분석 및 알림을 수행합니다.
 
 주요 기능:
-1. **retrieve_info**: RAG 검색 (Qdrant + ClickHouse)
+1. **retrieve_info**: 로그 컨텍스트 검색 (ClickHouse)
 2. **analyze_incident**: LLM 기반 분석
-3. **save_to_qdrant**: 분석 결과 Qdrant 저장 (옵션 A)
-4. **notify_admin**: Slack 알림 발송
+3. **notify_admin**: Slack 알림 발송
 
 워크플로우:
-retrieve_info → analyze → save_to_qdrant → notify → END
+retrieve_info → analyze → notify → END
+
+참고: 분석 결과의 Qdrant 저장은 Chat API에서만 사용자가 수동으로 수행합니다.
 """
 
 import json
@@ -41,17 +42,19 @@ class LogAnalysisAgent:
         에이전트 워크플로우 그래프 구성
 
         Flow:
-        retrieve_info → analyze → save_to_qdrant → notify → END
+        retrieve_info → analyze → notify → END
+
+        참고: save_to_qdrant 노드는 비활성화됨 (사용자가 수동으로 저장하는 옵션만 유지)
         """
         self.workflow.add_node("retrieve_info", self.retrieve_info)
         self.workflow.add_node("analyze", self.analyze_incident)
-        self.workflow.add_node("save_to_qdrant", self.save_to_qdrant)  # 옵션 A: 자동 저장
+        # self.workflow.add_node("save_to_qdrant", self.save_to_qdrant)  # 비활성화: 수동 저장만 사용
         self.workflow.add_node("notify", self.notify_admin)
 
         self.workflow.set_entry_point("retrieve_info")
         self.workflow.add_edge("retrieve_info", "analyze")
-        self.workflow.add_edge("analyze", "save_to_qdrant")  # 분석 후 Qdrant 저장
-        self.workflow.add_edge("save_to_qdrant", "notify")
+        self.workflow.add_edge("analyze", "notify")  # 분석 후 바로 알림 발송 (Qdrant 저장 건너뜀)
+        # self.workflow.add_edge("save_to_qdrant", "notify")  # 비활성화
         self.workflow.add_edge("notify", END)
 
         self.app = self.workflow.compile()

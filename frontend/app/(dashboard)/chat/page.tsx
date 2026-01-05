@@ -2,12 +2,12 @@
  * @file frontend/app/chat/page.tsx
  * @description
  * SMD 마운터 설비 전문 AI 분석가 채팅 인터페이스 페이지입니다.
- * RAG (Retrieval-Augmented Generation) 기반으로 과거 설비 이상 사례와 대응 매뉴얼을 참조하여
+ * ClickHouse 로그 검색 기반으로 실시간 설비 로그를 분석하여
  * 설비 로그 분석, 장애 원인 분석, 품질/가동률 문제 질의에 답변합니다.
  *
  * 주요 기능:
  * 1. **실시간 채팅**: 사용자 질문 → AI 응답
- * 2. **RAG 검색**: Qdrant에서 유사 사례 검색
+ * 2. **로그 검색**: ClickHouse에서 질문 관련 로그 검색
  * 3. **대화 히스토리**: 이전 대화 문맥 유지
  * 4. **Markdown 렌더링**: AI 응답에 포맷팅 적용
  *
@@ -29,8 +29,6 @@ import {
   User,
   Loader2,
   AlertCircle,
-  BookmarkPlus,
-  CheckCircle,
   FileText,
   Code,
   Globe,
@@ -41,7 +39,6 @@ import { useI18n } from "@/lib/i18n";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import {
   sendChatMessage,
-  saveToQdrant,
   getAllSettings,
 } from "@/lib/api-client";
 import type { ChatMessage } from "@/lib/types";
@@ -136,7 +133,6 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [savingMessageId, setSavingMessageId] = useState<string | null>(null);
   const [outputFormat, setOutputFormat] = useState<OutputFormat>("markdown");
   const [llmProvider, setLlmProvider] = useState<string>("local");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -259,35 +255,6 @@ export default function ChatPage() {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
-    }
-  };
-
-  /**
-   * Qdrant에 분석 결과 저장 (옵션 B - 수동 저장)
-   */
-  const handleSaveToQdrant = async (messageId: string, analysisId: string) => {
-    if (!analysisId) return;
-
-    setSavingMessageId(messageId);
-
-    try {
-      const result = await saveToQdrant({ analysis_id: analysisId });
-
-      if (result.success) {
-        // 메시지 상태 업데이트 (저장 완료 표시)
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === messageId ? { ...msg, savedToQdrant: true } : msg
-          )
-        );
-      } else {
-        setError(result.message);
-      }
-    } catch (err: any) {
-      console.error("Save to Qdrant error:", err);
-      setError("Qdrant 저장에 실패했습니다.");
-    } finally {
-      setSavingMessageId(null);
     }
   };
 
@@ -763,57 +730,14 @@ export default function ChatPage() {
                     {renderMessageContent(msg.content, msg.role)}
                   </div>
 
-                  {/* Timestamp + Save Button */}
-                  <div className="mt-2 flex items-center justify-between">
-                    {/* Qdrant 저장 버튼 (AI 응답 + analysisId 있는 경우만) */}
-                    {msg.role === "assistant" && msg.analysisId && (
-                      <button
-                        onClick={() =>
-                          handleSaveToQdrant(msg.id, msg.analysisId!)
-                        }
-                        disabled={
-                          msg.savedToQdrant || savingMessageId === msg.id
-                        }
-                        className={cn(
-                          "flex items-center gap-1 text-[10px] px-2 py-1 rounded transition-all",
-                          msg.savedToQdrant
-                            ? "text-green-400 bg-green-900/30 cursor-default"
-                            : savingMessageId === msg.id
-                            ? "text-gray-500 cursor-wait"
-                            : "text-gray-400 hover:text-primary hover:bg-primary/10 cursor-pointer"
-                        )}
-                        title={
-                          msg.savedToQdrant
-                            ? "저장됨"
-                            : "이 분석을 RAG 지식에 저장"
-                        }
-                      >
-                        {msg.savedToQdrant ? (
-                          <>
-                            <CheckCircle className="h-3 w-3" />
-                            저장됨
-                          </>
-                        ) : savingMessageId === msg.id ? (
-                          <>
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                            저장 중...
-                          </>
-                        ) : (
-                          <>
-                            <BookmarkPlus className="h-3 w-3" />
-                            RAG 저장
-                          </>
-                        )}
-                      </button>
-                    )}
-
-                    {/* Timestamp */}
-                    {isClient && (
-                      <span className="text-[10px] opacity-50 ml-auto">
+                  {/* Timestamp */}
+                  {isClient && (
+                    <div className="mt-2 flex items-center justify-end">
+                      <span className="text-[10px] opacity-50">
                         {new Date(msg.timestamp).toLocaleTimeString("ko-KR")}
                       </span>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               </div>
             );

@@ -2,18 +2,18 @@
 @file backend/app/api/api_v1/endpoints/chat.py
 @description
 사용자와 AI 간의 대화형 인터페이스를 제공하는 채팅 API 엔드포인트입니다.
-RAG (Retrieval-Augmented Generation) 기반으로 과거 사례와 매뉴얼을 참조하여 답변합니다.
+ClickHouse 로그 검색을 기반으로 실시간 분석을 수행하고, vLLM을 사용하여 AI 답변을 생성합니다.
 
 주요 기능:
 1. **POST /chat**: 사용자 질문에 대한 AI 응답 생성
-2. RAG 검색: Qdrant에서 유사 사례 검색
-3. vLLM 추론: 검색 결과를 기반으로 답변 생성
+2. 로그 검색: ClickHouse에서 질문 관련 로그 검색
+3. vLLM 추론: 검색된 로그를 기반으로 답변 생성
 
 초보자 가이드:
 - **message**: 사용자 질문 (예: "최근 API 서버 장애 원인은?")
 - **history**: 이전 대화 내역 (선택사항, 문맥 유지용)
 - **response**: AI가 생성한 답변 (Markdown 형식)
-- **sources**: 참조한 과거 사례 또는 매뉴얼
+- **sources**: 참조한 로그 항목들
 
 @example
 POST /api/v1/chat
@@ -25,7 +25,7 @@ POST /api/v1/chat
 Response:
 {
   "response": "### 분석 결과\n메모리 누수가 의심됩니다...",
-  "sources": ["매뉴얼: 메모리 누수 대응법", "과거 사례: 2024-01-01 유사 장애"]
+  "sources": ["[2024-01-15T10:30:00Z] ERROR api-server: Memory usage...", "[2024-01-15T10:31:00Z] ERROR api-server: GC failure..."]
 }
 """
 
@@ -63,22 +63,19 @@ class ChatResponse(BaseModel):
 @router.post("/", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
-    사용자 질문에 대한 AI 응답 생성 (RAG + vLLM)
+    사용자 질문에 대한 AI 응답 생성 (로그 기반 분석)
 
     Flow:
-    1. 사용자 질문 임베딩 생성 (TEI)
-    2. Qdrant에서 유사 매뉴얼/사례 검색
-    3. 검색 결과 + 질문을 vLLM에 전달
+    1. 사용자 질문에서 키워드 추출 및 로그 검색
+    2. ClickHouse에서 관련 로그 조회
+    3. 로그 + 질문을 vLLM에 전달
     4. AI 응답 생성 및 반환
     """
     try:
-        # 1. RAG 검색: 유사 매뉴얼/과거 사례 조회
-        similar_docs = await rag_engine.search_similar_incidents(request.message, limit=3)
-
-        # 2. LLM 클라이언트 생성 (프론트엔드에서 전달한 provider 사용)
+        # 1. LLM 클라이언트 생성 (프론트엔드에서 전달한 provider 사용)
         client = llm_factory.get_client(provider=request.llm_provider)
 
-        # 3. 시스템 프롬프트 로드 (상대 경로 수정)
+        # 2. 시스템 프롬프트 로드 (상대 경로 수정)
         import os
         prompt_paths = [
             "app/core/system_prompt.md",  # backend 디렉토리에서 실행 시
@@ -154,7 +151,7 @@ async def chat(request: ChatRequest):
         except Exception as e:
             print(f"Failed to fetch logs: {e}")
 
-        # 5. 문맥 구성 (필터링된 로그 + 최근 로그 + RAG 결과)
+        # 5. 문맥 구성 (필터링된 로그 + 최근 로그)
         context = ""
 
         # 키워드 필터링된 로그 (우선 표시)
@@ -169,31 +166,33 @@ async def chat(request: ChatRequest):
         else:
             context += "(최근 로그 없음)\n"
 
-        context += "\n### 참조 문서 및 과거 사례:\n"
+        # 6. Sources 생성 (로그 기반)
         sources = []
-        for idx, doc in enumerate(similar_docs, 1):
-            # Qdrant 응답 형식: {"score": float, "payload": {...}}
-            payload = doc.get("payload", {})
-            doc_title = payload.get("title", f"유사 사례 {idx}")
-            doc_content = payload.get("content", payload.get("text", f"점수: {doc.get('score', 0):.2f}"))
-            context += f"\n**[{idx}] {doc_title}** (유사도: {doc.get('score', 0):.2f})\n{doc_content}\n"
-            sources.append(doc_title)
+        if filtered_logs:
+            # 필터링된 로그 중 상위 5개를 sources로 사용
+            for log_entry in filtered_logs[:5]:
+                # 로그 항목을 간단히 표시 (예: "[2024-01-15T10:30:00Z] ERROR api-server: Connection timeout")
+                sources.append(log_entry[:60] + "..." if len(log_entry) > 60 else log_entry)
+        elif recent_logs:
+            # 필터링된 로그가 없으면 최근 로그 중 상위 5개
+            for log_entry in recent_logs[:5]:
+                sources.append(log_entry[:60] + "..." if len(log_entry) > 60 else log_entry)
+        else:
+            # 로그가 없으면 기본값
+            sources = ["실시간 로그 기반 분석"]
 
-        if not similar_docs:
-            context += "(유사 사례 없음 - 실시간 로그 기반으로 분석합니다)\n"
-
-        # 5. 대화 히스토리 포함
+        # 7. 대화 히스토리 포함
         messages = [{"role": "system", "content": system_persona}]
 
         if request.history:
             for msg in request.history[-5:]:  # 최근 5개 메시지만 포함
                 messages.append({"role": msg.role, "content": msg.content})
 
-        # 6. 현재 질문 추가
+        # 8. 현재 질문 추가
         user_prompt = f"{context}\n\n### 사용자 질문:\n{request.message}"
         messages.append({"role": "user", "content": user_prompt})
 
-        # 7. LLM 호출 (동적 모델명)
+        # 9. LLM 호출 (동적 모델명)
         model_name = llm_factory.get_model_name(provider=request.llm_provider)
 
         response = await client.chat.completions.create(
@@ -205,11 +204,11 @@ async def chat(request: ChatRequest):
 
         ai_response = response.choices[0].message.content
 
-        # 8. 분석 결과 저장 (ClickHouse) 및 ID 반환
+        # 10. 분석 결과 저장 (ClickHouse) 및 ID 반환
         analysis_id = None
         try:
             llm_provider_used = request.llm_provider or settings.LLM_PROVIDER
-            final_sources = sources if sources else ["실시간 분석 기반 답변"]
+            final_sources = sources if sources else ["실시간 로그 기반 분석"]
 
             # insert_analysis가 이제 ID를 반환함
             analysis_id = ch_client.insert_analysis(
@@ -225,8 +224,8 @@ async def chat(request: ChatRequest):
 
         return ChatResponse(
             response=ai_response,
-            sources=sources if sources else ["실시간 분석 기반 답변"],
-            analysis_id=analysis_id  # Qdrant 저장용 ID 반환
+            sources=sources if sources else ["실시간 로그 기반 분석"],
+            analysis_id=analysis_id  # 분석 결과 ID
         )
 
     except Exception as e:
