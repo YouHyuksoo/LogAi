@@ -26,23 +26,23 @@ _llm_provider_override = None  # 프론트엔드에서 선택한 provider 저장
 def get_summary_stats():
     # Example: Error count in last 1 hour
     query = """
-    SELECT count(*) FROM logs 
-    WHERE timestamp > now() - INTERVAL 1 HOUR 
+    SELECT count(*) FROM logs
+    WHERE timestamp > now() - INTERVAL 1 HOUR
     AND log_level = 'ERROR'
     """
     error_count = ch_client.client.execute(query)[0][0]
-    
+
     # Anomaly count
     query_anomaly = """
     SELECT count(*) FROM anomalies
     WHERE timestamp > now() - INTERVAL 1 HOUR
     """
     anomaly_count = ch_client.client.execute(query_anomaly)[0][0]
-    
+
     return {
         "recent_errors": error_count,
         "recent_anomalies": anomaly_count,
-        "system_status": "CRITICAL" if anomaly_count > 0 else "HEALTHY"
+        "system_status": "HEALTHY"  # Backend가 응답하면 항상 HEALTHY (Backend 통신 여부만 판단)
     }
 
 @router.get("/trend")

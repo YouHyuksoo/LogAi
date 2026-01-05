@@ -38,7 +38,9 @@
       "Bash(./venv/Scripts/pip.exe show:*)",
       "Bash(cat:*)",
       "Bash(d:/Project/LogAi/venv/Scripts/pip.exe install:*)",
-      "Bash(docker-compose:*)"
+      "Bash(docker-compose:*)",
+      "Bash(curl:*)",
+      "Bash(python -m json.tool:*)"
     ]
   }
 }

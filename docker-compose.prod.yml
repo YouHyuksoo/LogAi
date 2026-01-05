@@ -179,8 +179,8 @@ services:
     container_name: logai-frontend
     ports:
       - 3000:3000
-    environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
+    # 환경 변수 제거 - 클라이언트 사이드에서 현재 호스트를 자동으로 감지합니다
+    # (api-client.ts에서 window.location.hostname으로 동적 감지)
     depends_on:
       - backend
     networks:

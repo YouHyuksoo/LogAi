@@ -63,23 +63,28 @@ class ChatResponse(BaseModel):
 @router.post("/", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
-    사용자 질문에 대한 AI 응답 생성 (로그 기반 분석)
+    사용자 질문에 대한 AI 응답 생성 (Text-to-SQL 기반 분석)
 
     Flow:
-    1. 사용자 질문에서 키워드 추출 및 로그 검색
-    2. ClickHouse에서 관련 로그 조회
-    3. 로그 + 질문을 vLLM에 전달
-    4. AI 응답 생성 및 반환
+    1. LLM이 테이블 스키마를 기반으로 SQL 쿼리 생성
+    2. ClickHouse에서 쿼리 실행
+    3. 결과를 LLM이 분석하여 답변 생성
+    4. AI 응답 반환
+
+    주요 개선:
+    - 모든 질문 유형을 유연하게 처리
+    - 빈도, 원인, 패턴 등 다양한 분석 지원
+    - LLM이 필요한 데이터를 스스로 판단
     """
     try:
-        # 1. LLM 클라이언트 생성 (프론트엔드에서 전달한 provider 사용)
+        # 1. LLM 클라이언트 생성
         client = llm_factory.get_client(provider=request.llm_provider)
 
-        # 2. 시스템 프롬프트 로드 (상대 경로 수정)
+        # 2. 시스템 프롬프트 로드
         import os
         prompt_paths = [
-            "app/core/system_prompt.md",  # backend 디렉토리에서 실행 시
-            "backend/app/core/system_prompt.md",  # 루트 디렉토리에서 실행 시
+            "app/core/system_prompt.md",
+            "backend/app/core/system_prompt.md",
         ]
         system_persona = "당신은 NPM SMT 마운터 로그 분석 및 설비 문제 해결을 전문으로 하는 AI 어시스턴트입니다."
 
@@ -92,56 +97,161 @@ async def chat(request: ChatRequest):
                 except Exception:
                     pass
 
-        # 4. 최근 로그 데이터 조회 (실시간 분석용 - 키워드 필터링 지원)
+        # 3. ClickHouse 클라이언트
         from app.services.clickhouse_client import ch_client
         import re
 
+        # ==================== 분석 과정 로깅 ====================
+        import json
+        import time
+
+        process_steps = []
+        start_time = time.time()
+
+        # ==================== STEP 1: LLM이 SQL 쿼리 생성 ====================
+        print(f"🔍 Step 1: SQL 쿼리 생성 시작 - '{request.message}'")
+        step1_start = time.time()
+
+        # ClickHouse 스키마 정보 (LLM에게 제공)
+        db_schema = """
+### ClickHouse 테이블 구조:
+
+**logs 테이블** (로그 저장소)
+- timestamp: DateTime (로그 발생 시간)
+- log_level: String (DEBUG, INFO, WARN, ERROR)
+- service: String (NPM/AM-04, NPM/AM-06 등)
+- template_id: UInt16 (Drain3 템플릿 ID)
+- raw_message: String (원본 로그 메시지)
+
+**anomalies 테이블** (이상 탐지 결과)
+- timestamp: DateTime (탐지 시간)
+- template_id: UInt16 (템플릿 ID)
+- anomaly_score: Float32 (이상도, 0.0~1.0)
+- is_anomaly: UInt8 (1=이상, 0=정상)
+- status: String (open, resolved, closed)
+
+**analysis_results 테이블** (분석 결과)
+- timestamp: DateTime (분석 시간)
+- query: String (사용자 질문)
+- ai_response: String (AI 답변)
+- sources: Array(String) (참조 소스)
+
+예시 쿼리:
+- 빈도: SELECT service, COUNT(*) as cnt FROM logs WHERE log_level='ERROR' GROUP BY service
+- 시간대: SELECT toStartOfHour(timestamp) as hour, COUNT(*) FROM logs GROUP BY hour
+- 패턴: SELECT log_template, COUNT(*) FROM logs GROUP BY log_template ORDER BY COUNT(*) DESC
+"""
+
+        # LLM에게 SQL 생성 요청
+        sql_generation_prompt = f"""{db_schema}
+
+사용자 질문: "{request.message}"
+
+위 테이블 구조를 바탕으로 사용자 질문을 분석하여 필요한 ClickHouse SQL 쿼리를 작성해줘.
+
+규칙:
+1. SELECT 문만 작성 (INSERT, DELETE, DROP 금지)
+2. 시간 필터는 최근 7일 기준 (DATE_SUB(NOW(), INTERVAL 7 DAY))
+3. LIMIT은 최대 100
+4. 결과를 정리하기 쉽게 ORDER BY 추가
+
+응답 형식:
+```sql
+SELECT ...
+```
+
+쿼리가 불가능하면 "NO_QUERY" 라고만 답변"""
+
+        sql_response = await client.chat.completions.create(
+            model=llm_factory.get_model_name(provider=request.llm_provider),
+            messages=[{"role": "user", "content": sql_generation_prompt}],
+            temperature=0.1,  # 쿼리는 정확하게
+            max_tokens=500
+        )
+
+        sql_query = sql_response.choices[0].message.content.strip()
+        print(f"📝 생성된 쿼리:\n{sql_query}")
+
+        process_steps.append({
+            "step": "SQL_GENERATION",
+            "duration_ms": round((time.time() - step1_start) * 1000),
+            "generated_sql": sql_query,
+            "status": "success"
+        })
+
+        # ==================== STEP 2: SQL 검증 ====================
+        query_data = None
+        sql_execution_success = False
+        step2_start = time.time()
+
+        if sql_query != "NO_QUERY" and sql_query.upper().startswith("SELECT"):
+            # 기본 보안: 위험한 명령어 체크
+            dangerous_keywords = ["DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "TRUNCATE"]
+            is_safe = not any(kw in sql_query.upper() for kw in dangerous_keywords)
+
+            if is_safe:
+                try:
+                    print(f"✅ SQL 검증 통과, 실행 중...")
+                    # ==================== STEP 3: ClickHouse 실행 ====================
+                    # SQL에서 코드블록 마크다운 제거
+                    clean_query = sql_query.replace("```sql", "").replace("```", "").strip()
+                    query_data = ch_client.execute(clean_query)
+                    sql_execution_success = True
+                    print(f"✅ 쿼리 실행 성공, {len(query_data) if query_data else 0}개 행 반환")
+
+                    process_steps.append({
+                        "step": "SQL_EXECUTION",
+                        "duration_ms": round((time.time() - step2_start) * 1000),
+                        "success": True,
+                        "rows_returned": len(query_data) if query_data else 0
+                    })
+                except Exception as e:
+                    print(f"❌ 쿼리 실행 실패: {e}")
+                    query_data = None
+                    process_steps.append({
+                        "step": "SQL_EXECUTION",
+                        "duration_ms": round((time.time() - step2_start) * 1000),
+                        "success": False,
+                        "error": str(e)
+                    })
+            else:
+                print(f"⚠️ 위험한 SQL 감지, 실행 방지")
+                process_steps.append({
+                    "step": "SQL_VALIDATION",
+                    "duration_ms": round((time.time() - step2_start) * 1000),
+                    "success": False,
+                    "reason": "Dangerous keywords detected"
+                })
+                query_data = None
+
+        # ==================== STEP 4: 결과 분석 ====================
+        context = f"사용자 질문: {request.message}\n\n"
+
+        if query_data:
+            # 데이터를 텍스트로 포맷
+            data_text = "쿼리 결과:\n"
+            for i, row in enumerate(query_data[:20]):  # 최대 20행만 표시
+                data_text += f"{i+1}. {row}\n"
+            context += data_text
+        elif sql_query != "NO_QUERY":
+            # SQL은 생성되었는데 실행 실패 → 오류 메시지만 표시
+            context += f"⚠️ SQL 쿼리 실행 실패. 자세한 데이터 없이 질문에 답변할 수 없습니다.\n"
+            context += f"생성된 쿼리: {sql_query}\n"
+        else:
+            # SQL을 생성할 수 없는 경우 → 최근 로그 사용
+            context += "SQL을 생성할 수 없어 최근 로그를 기반으로 분석합니다.\n"
+            try:
+                log_query = "SELECT timestamp, log_level, service, raw_message FROM logs ORDER BY timestamp DESC LIMIT 10"
+                log_result = ch_client.execute(log_query)
+                context += "\n최근 로그:\n"
+                for row in log_result:
+                    context += f"[{row[0]}] {row[1]} {row[2]}: {row[3]}\n"
+            except Exception as e:
+                print(f"최근 로그 조회 실패: {e}")
+
+        # 최근 로그도 추가 (배경 정보)
         recent_logs = []
-        filtered_logs = []
-
-        # 사용자 질문에서 키워드 추출
-        keywords = []
-
-        # 장비 패턴 (NPM/AM-01 ~ NPM/AM-09)
-        machine_match = re.findall(r'NPM/AM-\d{2}', request.message, re.IGNORECASE)
-        if machine_match:
-            keywords.extend(machine_match)
-
-        # 이벤트 키워드 추출
-        event_keywords = [
-            'Recog error', '인식 오류', '인식오류',
-            'PCB carrying', 'PCB 반입', 'PCB 반출',
-            'Board available', '보드',
-            'Product 1board', '생산',
-            'Wait for', '대기',
-            'Single stop', '정지',
-            'Signal tower', '신호탑',
-            'ERROR', 'WARN', '에러', '오류', '경고'
-        ]
-        for kw in event_keywords:
-            if kw.lower() in request.message.lower():
-                keywords.append(kw)
-
         try:
-            # 키워드가 있으면 필터링된 로그 조회
-            if keywords:
-                # 각 키워드별로 로그 검색
-                for kw in keywords[:3]:  # 최대 3개 키워드
-                    safe_kw = kw.replace("'", "''")
-                    filter_query = f"""
-                        SELECT timestamp, log_level, service, raw_message
-                        FROM logs
-                        WHERE raw_message LIKE '%{safe_kw}%' OR service LIKE '%{safe_kw}%'
-                        ORDER BY timestamp DESC
-                        LIMIT 10
-                    """
-                    result = ch_client.execute(filter_query)
-                    for row in result:
-                        log_line = f"[{row[0]}] {row[1]} {row[2]}: {row[3]}"
-                        if log_line not in filtered_logs:
-                            filtered_logs.append(log_line)
-
-            # 최근 로그도 함께 조회 (필터링 결과가 없을 경우 대비)
             log_query = "SELECT timestamp, log_level, service, raw_message FROM logs ORDER BY timestamp DESC LIMIT 10"
             log_result = ch_client.execute(log_query)
             recent_logs = [
@@ -149,50 +259,29 @@ async def chat(request: ChatRequest):
                 for row in log_result
             ]
         except Exception as e:
-            print(f"Failed to fetch logs: {e}")
+            print(f"최근 로그 조회 실패: {e}")
 
-        # 5. 문맥 구성 (필터링된 로그 + 최근 로그)
-        context = ""
+        # ==================== STEP 5: LLM이 최종 답변 생성 ====================
+        print(f"🤖 Step 5: 최종 답변 생성 중...")
 
-        # 키워드 필터링된 로그 (우선 표시)
-        if filtered_logs:
-            context += f"### 질문 관련 로그 (키워드: {', '.join(keywords[:3])}):\n"
-            context += "\n".join(filtered_logs[:15]) + "\n\n"
-
-        # 최근 로그
-        context += "### 최근 수집된 로그:\n"
-        if recent_logs:
-            context += "\n".join(recent_logs[:10]) + "\n"
-        else:
-            context += "(최근 로그 없음)\n"
-
-        # 6. Sources 생성 (로그 기반)
-        sources = []
-        if filtered_logs:
-            # 필터링된 로그 중 상위 5개를 sources로 사용
-            for log_entry in filtered_logs[:5]:
-                # 로그 항목을 간단히 표시 (예: "[2024-01-15T10:30:00Z] ERROR api-server: Connection timeout")
-                sources.append(log_entry[:60] + "..." if len(log_entry) > 60 else log_entry)
-        elif recent_logs:
-            # 필터링된 로그가 없으면 최근 로그 중 상위 5개
-            for log_entry in recent_logs[:5]:
-                sources.append(log_entry[:60] + "..." if len(log_entry) > 60 else log_entry)
-        else:
-            # 로그가 없으면 기본값
-            sources = ["실시간 로그 기반 분석"]
-
-        # 7. 대화 히스토리 포함
+        # 대화 히스토리 포함
         messages = [{"role": "system", "content": system_persona}]
 
         if request.history:
             for msg in request.history[-5:]:  # 최근 5개 메시지만 포함
                 messages.append({"role": msg.role, "content": msg.content})
 
-        # 8. 현재 질문 추가
-        user_prompt = f"{context}\n\n### 사용자 질문:\n{request.message}"
-        messages.append({"role": "user", "content": user_prompt})
+        # 쿼리 결과 또는 최근 로그를 바탕으로 최종 분석
+        final_prompt = f"""{context}
 
-        # 9. LLM 호출 (동적 모델명)
+위 정보를 바탕으로 사용자 질문에 명확하고 정확하게 답변해줘.
+- 통계나 빈도 데이터가 있으면 구체적인 숫자로 설명
+- 패턴이나 트렌드가 있으면 분석 결과 제시
+- 명확한 해석을 제공"""
+
+        messages.append({"role": "user", "content": final_prompt})
+
+        # LLM 호출
         model_name = llm_factory.get_model_name(provider=request.llm_provider)
 
         response = await client.chat.completions.create(
@@ -203,29 +292,68 @@ async def chat(request: ChatRequest):
         )
 
         ai_response = response.choices[0].message.content
+        print(f"✅ 답변 생성 완료")
 
-        # 10. 분석 결과 저장 (ClickHouse) 및 ID 반환
+        # ==================== STEP 6: Sources 생성 ====================
+        sources = []
+        if query_data:
+            # 쿼리 결과를 sources로 사용
+            for i, row in enumerate(query_data[:3]):
+                sources.append(f"데이터 행 {i+1}: {row}")
+        elif recent_logs:
+            # Fallback: 최근 로그
+            for log_entry in recent_logs[:3]:
+                sources.append(log_entry)
+        else:
+            sources = ["실시간 로그 기반 분석"]
+
+        # ==================== STEP 7: 분석 결과 저장 ====================
         analysis_id = None
         try:
             llm_provider_used = request.llm_provider or settings.LLM_PROVIDER
-            final_sources = sources if sources else ["실시간 로그 기반 분석"]
 
-            # insert_analysis가 이제 ID를 반환함
+            # 쿼리 결과를 JSON으로 직렬화
+            sql_execution_result_json = None
+            if query_data:
+                try:
+                    # 쿼리 결과를 직렬화 가능한 형식으로 변환
+                    result_list = [list(row) if hasattr(row, '__iter__') else str(row) for row in query_data[:20]]
+                    sql_execution_result_json = json.dumps(result_list, ensure_ascii=False, default=str)
+                except Exception as e:
+                    print(f"⚠️ 쿼리 결과 직렬화 실패: {e}")
+                    sql_execution_result_json = None
+
+            # 전체 과정 로그를 JSON으로
+            process_steps.append({
+                "step": "TOTAL_PROCESS",
+                "total_duration_ms": round((time.time() - start_time) * 1000),
+                "timestamp": json.loads(json.dumps({"now": str(time.time())}, default=str))["now"]
+            })
+
+            process_log_json = json.dumps(process_steps, ensure_ascii=False, default=str)
+
             analysis_id = ch_client.insert_analysis(
                 query=request.message,
-                keywords=keywords,
-                log_context=context[:5000],  # 너무 길면 잘라냄
+                keywords=[],  # Text-to-SQL 방식에서는 키워드 불필요
+                log_context=context[:5000],
+                llm_prompt=final_prompt,  # LLM에게 보낸 최종 프롬프트
                 ai_response=ai_response,
                 llm_provider=llm_provider_used,
-                sources=final_sources
+                sources=sources,
+                generated_sql=sql_query if sql_query != "NO_QUERY" else None,
+                sql_execution_success=sql_execution_success,
+                sql_execution_result=sql_execution_result_json,
+                process_log=process_log_json
             )
+            print(f"✅ 분석 결과 저장 완료 (ID: {analysis_id})")
+            print(f"📊 분석 과정: {process_log_json}")
         except Exception as save_error:
-            print(f"Failed to save analysis result: {save_error}")
+            print(f"⚠️ 분석 결과 저장 실패: {save_error}")
 
         return ChatResponse(
             response=ai_response,
-            sources=sources if sources else ["실시간 로그 기반 분석"],
-            analysis_id=analysis_id  # 분석 결과 ID
+            sources=sources,
+            analysis_id=analysis_id
         )
 
     except Exception as e:
@@ -240,7 +368,7 @@ def chat_health():
 @router.get("/history")
 def get_analysis_history(limit: int = 20):
     """
-    분석 히스토리 조회
+    분석 히스토리 조회 (Text-to-SQL 과정 포함)
 
     Args:
         limit: 조회할 개수 (기본값: 20)
@@ -251,7 +379,15 @@ def get_analysis_history(limit: int = 20):
     from app.services.clickhouse_client import ch_client
 
     try:
-        results = ch_client.get_analysis_history(limit=limit)
+        query = f"""
+            SELECT id, timestamp, query, keywords, ai_response, llm_provider, sources,
+                   generated_sql, sql_execution_success, sql_execution_result, process_log, llm_prompt
+            FROM analysis_results
+            ORDER BY timestamp DESC
+            LIMIT {int(limit)}
+        """
+        results = ch_client.execute(query)
+
         return [
             {
                 "id": str(row[0]),
@@ -260,7 +396,12 @@ def get_analysis_history(limit: int = 20):
                 "keywords": row[3],
                 "ai_response": row[4][:500] + "..." if len(row[4]) > 500 else row[4],
                 "llm_provider": row[5],
-                "sources": row[6]
+                "sources": row[6],
+                "generated_sql": row[7],
+                "sql_execution_success": bool(row[8]),
+                "sql_execution_result": row[9],
+                "process_log": row[10],
+                "llm_prompt": row[11]
             }
             for row in results
         ]
@@ -271,19 +412,20 @@ def get_analysis_history(limit: int = 20):
 @router.get("/history/{analysis_id}")
 def get_analysis_detail(analysis_id: str):
     """
-    분석 상세 조회
+    분석 상세 조회 (전체 과정 포함)
 
     Args:
         analysis_id: 분석 ID (UUID)
 
     Returns:
-        분석 상세 정보
+        분석 상세 정보 (질문, 생성된 SQL, 실행 결과, 최종 답변, 과정 로그)
     """
     from app.services.clickhouse_client import ch_client
 
     try:
         query = f"""
-            SELECT id, timestamp, query, keywords, log_context, ai_response, llm_provider, sources
+            SELECT id, timestamp, query, keywords, log_context, ai_response, llm_provider, sources,
+                   generated_sql, sql_execution_success, sql_execution_result, process_log, llm_prompt
             FROM analysis_results
             WHERE id = '{analysis_id}'
             LIMIT 1
@@ -294,6 +436,23 @@ def get_analysis_detail(analysis_id: str):
             raise HTTPException(status_code=404, detail="Analysis not found")
 
         row = results[0]
+
+        # process_log JSON 파싱 시도
+        process_log_data = None
+        try:
+            if row[11]:
+                process_log_data = json.loads(row[11])
+        except Exception:
+            process_log_data = None
+
+        # sql_execution_result JSON 파싱 시도
+        sql_result_data = None
+        try:
+            if row[10]:
+                sql_result_data = json.loads(row[10])
+        except Exception:
+            sql_result_data = row[10]
+
         return {
             "id": str(row[0]),
             "timestamp": row[1].isoformat() if row[1] else None,
@@ -302,7 +461,17 @@ def get_analysis_detail(analysis_id: str):
             "log_context": row[4],
             "ai_response": row[5],
             "llm_provider": row[6],
-            "sources": row[7]
+            "sources": row[7],
+            "generated_sql": row[8],
+            "sql_execution_success": bool(row[9]),
+            "sql_execution_result": sql_result_data,
+            "process_log": process_log_data,
+            "llm_prompt": row[12],  # LLM에게 보낸 프롬프트
+            "analysis_summary": {
+                "total_steps": len(process_log_data) if process_log_data else 0,
+                "sql_used": bool(row[8]),
+                "sql_success": bool(row[9])
+            }
         }
     except HTTPException:
         raise

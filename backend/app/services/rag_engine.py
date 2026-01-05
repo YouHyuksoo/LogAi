@@ -57,13 +57,21 @@ class RageEngine:
     def __init__(self):
         self.qdrant = QdrantClient(host=settings.QDRANT_HOST, port=settings.QDRANT_PORT)
         self.collection_name = "incident_manuals"
+        self.normal_patterns_collection = "normal_log_patterns"
+        self.anomaly_patterns_collection = "anomaly_log_patterns"
+        self.incident_resolutions_collection = "incident_resolutions"
         self.vector_size = _get_vector_size()
         self._init_qdrant()
 
     def _init_qdrant(self):
         """
         Qdrant 컬렉션 초기화 (없으면 생성)
+        - incident_manuals: 기존 사례/매뉴얼 (하위 호환성)
+        - normal_log_patterns: 정상 로그 패턴
+        - anomaly_log_patterns: 비정상 로그 패턴
+        - incident_resolutions: 해결된 인시던트 사례 (과거 해결 방법)
         """
+        # 1. incident_manuals 컬렉션 초기화
         try:
             existing = self.qdrant.get_collection(self.collection_name)
             # 기존 컬렉션의 벡터 크기가 다르면 재생성
@@ -83,6 +91,157 @@ class RageEngine:
                 ),
             )
             print(f"✅ Qdrant 컬렉션 생성 완료: {self.collection_name} (벡터 크기: {self.vector_size})")
+
+        # 2. normal_log_patterns 컬렉션 초기화
+        self._init_or_recreate_collection(self.normal_patterns_collection)
+
+        # 3. anomaly_log_patterns 컬렉션 초기화
+        self._init_or_recreate_collection(self.anomaly_patterns_collection)
+
+        # 4. incident_resolutions 컬렉션 초기화
+        self._init_or_recreate_collection(self.incident_resolutions_collection)
+
+    def _init_or_recreate_collection(self, collection_name: str):
+        """
+        컬렉션 초기화 또는 재생성 (벡터 크기 검증)
+
+        Args:
+            collection_name: 컬렉션 이름
+        """
+        try:
+            existing = self.qdrant.get_collection(collection_name)
+            # 벡터 크기가 다르면 재생성
+            existing_size = existing.config.params.vectors.size
+            if existing_size != self.vector_size:
+                print(f"⚠️ {collection_name} 벡터 크기 불일치: 기존={existing_size}, 필요={self.vector_size}")
+                print(f"🔄 컬렉션 '{collection_name}' 재생성 중...")
+                self.qdrant.delete_collection(collection_name)
+                raise Exception("Recreate collection")
+        except Exception:
+            # 컬렉션 생성
+            self.qdrant.create_collection(
+                collection_name=collection_name,
+                vectors_config=models.VectorParams(
+                    size=self.vector_size,
+                    distance=models.Distance.COSINE
+                ),
+            )
+            print(f"✅ Qdrant 컬렉션 생성 완료: {collection_name} (벡터 크기: {self.vector_size})")
+
+    # ==================== Pattern Search Methods ====================
+
+    async def search_patterns(self, collection_name: str, query_vector: List[float], limit: int = 3):
+        """
+        패턴 컬렉션에서 유사 패턴 검색
+
+        Args:
+            collection_name: 'normal_log_patterns' 또는 'anomaly_log_patterns'
+            query_vector: 쿼리 벡터
+            limit: 상위 결과 개수
+
+        Returns:
+            [(score, payload), ...] 리스트
+        """
+        try:
+            results = self.qdrant.search(
+                collection_name=collection_name,
+                query_vector=query_vector,
+                limit=limit
+            )
+            return [{"score": hit.score, "payload": hit.payload, "id": hit.id} for hit in results]
+        except Exception as e:
+            print(f"❌ 패턴 검색 실패 ({collection_name}): {e}")
+            return []
+
+    async def save_pattern_batch(self, collection_name: str, patterns: List[dict]) -> List[str]:
+        """
+        여러 패턴을 배치로 저장
+
+        Args:
+            collection_name: 'normal_log_patterns' 또는 'anomaly_log_patterns'
+            patterns: [
+                {
+                    "template_id": int,
+                    "log_template": str,
+                    "representative_message": str,
+                    "log_level": str,
+                    "service": str,
+                    "keywords": List[str]
+                },
+                ...
+            ]
+
+        Returns:
+            저장된 패턴 ID 리스트
+        """
+        if not patterns:
+            return []
+
+        # 1. 모든 패턴의 텍스트 추출 (임베딩용)
+        texts = [f"{p['log_template']}\n\n{p['representative_message']}" for p in patterns]
+
+        # 2. 배치 임베딩
+        vectors = await embedding_client.embed_documents(texts)
+
+        # 3. Qdrant Point 구성
+        points = []
+        pattern_ids = []
+        for pattern, vector in zip(patterns, vectors):
+            point_id = str(uuid.uuid4())
+            pattern_ids.append(point_id)
+
+            payload = {
+                "template_id": pattern["template_id"],
+                "log_template": pattern["log_template"],
+                "representative_message": pattern["representative_message"],
+                "log_level": pattern["log_level"],
+                "service": pattern["service"],
+                "keywords": pattern.get("keywords", []),
+                "label_source": pattern.get("label_source", "auto"),
+                "sample_count": pattern.get("sample_count", 1),
+                "first_seen": pattern.get("first_seen", datetime.now().isoformat()),
+                "last_seen": pattern.get("last_seen", datetime.now().isoformat())
+            }
+
+            # anomaly_log_patterns 컬렉션일 경우 추가 필드
+            if "anomaly_type" in pattern:
+                payload["anomaly_type"] = pattern["anomaly_type"]
+            if "severity" in pattern:
+                payload["severity"] = pattern["severity"]
+
+            points.append(
+                models.PointStruct(
+                    id=point_id,
+                    vector=vector,
+                    payload=payload
+                )
+            )
+
+        # 4. Qdrant에 배치 저장
+        self.qdrant.upsert(
+            collection_name=collection_name,
+            points=points
+        )
+
+        print(f"✅ 패턴 배치 저장 완료: {collection_name} ({len(patterns)}건)")
+        return pattern_ids
+
+    def delete_pattern(self, collection_name: str, point_id: str):
+        """
+        패턴 삭제
+
+        Args:
+            collection_name: 컬렉션 이름
+            point_id: 삭제할 Point ID
+        """
+        try:
+            self.qdrant.delete(
+                collection_name=collection_name,
+                points_selector=models.PointIdsList(ids=[point_id])
+            )
+            print(f"✅ 패턴 삭제 완료: {collection_name}/{point_id}")
+        except Exception as e:
+            print(f"❌ 패턴 삭제 실패: {e}")
 
     async def search_similar_incidents(self, query_log: str, limit: int = 3):
         """Search for similar past incidents in Qdrant."""
@@ -256,6 +415,107 @@ class RageEngine:
             return collection_info.points_count
         except Exception:
             return 0
+
+    # ==================== Incident Resolution Methods ====================
+
+    async def search_resolutions(self, query_text: str, limit: int = 5):
+        """
+        과거 해결 사례 검색
+
+        Args:
+            query_text: 검색 쿼리 (이상 탐지 상세 정보)
+            limit: 상위 결과 개수
+
+        Returns:
+            유사 해결 사례 목록 [{score, payload, id}, ...]
+        """
+        try:
+            query_vector = await embedding_client.embed_query(query_text)
+
+            results = self.qdrant.search(
+                collection_name=self.incident_resolutions_collection,
+                query_vector=query_vector,
+                limit=limit
+            )
+
+            return [
+                {
+                    "score": hit.score,
+                    "payload": hit.payload,
+                    "id": hit.id
+                }
+                for hit in results
+            ]
+        except Exception as e:
+            print(f"❌ 해결 사례 검색 실패: {e}")
+            return []
+
+    async def save_resolution(
+        self,
+        incident_summary: str,
+        resolution_text: str,
+        resolved_by: str,
+        anomaly_score: float,
+        service: str = "",
+        template_id: Optional[int] = None,
+        severity: str = "warning",
+        metadata: Optional[dict] = None
+    ) -> str:
+        """
+        해결 정보를 Qdrant incident_resolutions 컬렉션에 저장
+
+        Args:
+            incident_summary: 인시던트 요약 (상세 정보)
+            resolution_text: 해결 방법 상세 설명
+            resolved_by: 해결자 이름
+            anomaly_score: 이상 점수 (0.0 ~ 1.0)
+            service: 서비스명
+            template_id: Drain3 템플릿 ID
+            severity: 심각도 (critical, warning, info)
+            metadata: 추가 메타데이터
+
+        Returns:
+            저장된 Point ID (UUID)
+        """
+        try:
+            # 1. 임베딩 생성 (인시던트 요약 + 해결 내용)
+            text_to_embed = f"{incident_summary}\n\n해결 방법: {resolution_text}"
+            vector = await embedding_client.embed_query(text_to_embed)
+
+            # 2. Point ID 생성
+            point_id = str(uuid.uuid4())
+
+            # 3. Payload 구성
+            payload = {
+                "incident_summary": incident_summary,
+                "resolution": resolution_text,
+                "resolved_by": resolved_by,
+                "anomaly_score": anomaly_score,
+                "service": service,
+                "template_id": template_id,
+                "severity": severity,
+                "timestamp": datetime.now().isoformat(),
+                "metadata": metadata or {}
+            }
+
+            # 4. Qdrant에 저장
+            self.qdrant.upsert(
+                collection_name=self.incident_resolutions_collection,
+                points=[
+                    models.PointStruct(
+                        id=point_id,
+                        vector=vector,
+                        payload=payload
+                    )
+                ]
+            )
+
+            print(f"✅ 해결 사례 저장 완료: {incident_summary[:50]}... (ID: {point_id})")
+            return point_id
+
+        except Exception as e:
+            print(f"❌ 해결 사례 저장 실패: {e}")
+            return ""
 
 
 rag_engine = RageEngine()

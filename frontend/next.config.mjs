@@ -21,7 +21,8 @@
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: 'standalone', // Docker 최적화: 필요한 파일만 포함
+  // Docker 프로덕션 빌드 시에만 standalone 활성화
+  output: process.env.NEXT_STANDALONE === 'true' ? 'standalone' : undefined,
 };
 
 export default nextConfig;

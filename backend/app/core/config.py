@@ -74,4 +74,10 @@ class Settings:
     # "error-warning" - ERROR, WARNING 레벨만 저장
     LOG_STORAGE_POLICY: str = os.getenv("LOG_STORAGE_POLICY", "all")
 
+    # Vector-based Log Pattern Classification
+    VECTOR_CLASSIFICATION_ENABLED: bool = os.getenv("VECTOR_CLASSIFICATION_ENABLED", "true").lower() == "true"
+    VECTOR_CLASSIFICATION_THRESHOLD_NORMAL: float = float(os.getenv("VECTOR_CLASSIFICATION_THRESHOLD_NORMAL", "0.7"))
+    VECTOR_CLASSIFICATION_THRESHOLD_ANOMALY: float = float(os.getenv("VECTOR_CLASSIFICATION_THRESHOLD_ANOMALY", "0.8"))
+    VECTOR_TOP_K_SEARCH: int = int(os.getenv("VECTOR_TOP_K_SEARCH", "3"))
+
 settings = Settings()

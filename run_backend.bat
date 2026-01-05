@@ -33,6 +33,18 @@ echo.
 REM 현재 디렉토리 저장
 set "PROJECT_ROOT=%~dp0"
 
+REM IP 주소 자동 감지
+for /f "tokens=2 delims=:" %%a in ('ipconfig ^| findstr /c:"IPv4 주소"') do (
+    set "IP_ADDRESS=%%a"
+)
+REM 공백 제거
+for /f "tokens=* delims= " %%a in ("%IP_ADDRESS%") do set "IP_ADDRESS=%%a"
+
+REM IP 주소 감지 실패 시 localhost 사용
+if "%IP_ADDRESS%"=="" (
+    set "IP_ADDRESS=localhost"
+)
+
 REM 가상환경 활성화
 echo [1/3] 가상환경 활성화 중...
 call "%PROJECT_ROOT%venv\Scripts\activate.bat"
@@ -60,8 +72,8 @@ REM Uvicorn 서버 시작
 echo [3/3] FastAPI 서버 시작 중...
 echo.
 echo 서버 정보:
-echo   - URL: http://localhost:8000
-echo   - API 문서: http://localhost:8000/docs
+echo   - URL: http://%IP_ADDRESS%:8000
+echo   - API 문서: http://%IP_ADDRESS%:8000/docs
 echo   - 개발 모드: 자동 재시작 활성화
 echo.
 echo 서버를 종료하려면 Ctrl+C를 누르세요.

@@ -32,6 +32,9 @@ import {
   FileText,
   Code,
   Globe,
+  X,
+  BookOpen,
+  Lightbulb,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/theme";
@@ -81,6 +84,18 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   gemini: "Google Gemini (1.5 Flash)",
   mistral: "Mistral AI (Large)",
 };
+
+/**
+ * @description
+ * 채팅 초반에 사용자에게 제안할 문구들입니다.
+ * 사용자가 클릭하면 자동으로 입력창에 채워집니다.
+ */
+const CHAT_SUGGESTIONS = [
+  "최근 Placement Error가 급증한 원인은?",
+  "Memory 사용량이 갑자기 증가한 이유를 분석해줘",
+  "Error rate가 높은 이유를 찾아줄래?",
+  "어제 장애가 발생했던 패턴을 알려줘",
+];
 
 export default function ChatPage() {
   const { theme } = useTheme();
@@ -135,6 +150,10 @@ export default function ChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [outputFormat, setOutputFormat] = useState<OutputFormat>("markdown");
   const [llmProvider, setLlmProvider] = useState<string>("local");
+  const [sourcesModal, setSourcesModal] = useState<{ isOpen: boolean; sources: string[] }>({
+    isOpen: false,
+    sources: [],
+  });
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // ==================== Effects ====================
@@ -205,7 +224,7 @@ export default function ChatPage() {
         llm_provider: llmProvider,
       });
 
-      // AI 응답 메시지 추가 (analysis_id 포함)
+      // AI 응답 메시지 추가 (analysis_id + sources 포함)
       const assistantMessage: ChatMessage = {
         id: `assistant-${Date.now()}`,
         role: "assistant",
@@ -213,22 +232,10 @@ export default function ChatPage() {
         timestamp: new Date().toISOString(),
         analysisId: response.analysis_id, // Qdrant 저장용 ID
         savedToQdrant: false,
+        sources: response.sources && response.sources.length > 0 ? response.sources : undefined,
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
-
-      // 참조 소스가 있으면 별도 메시지로 추가
-      if (response.sources && response.sources.length > 0) {
-        const sourcesMessage: ChatMessage = {
-          id: `sources-${Date.now()}`,
-          role: "system",
-          content: `📚 참조 문서:\n${response.sources
-            .map((s: string, i: number) => `${i + 1}. ${s}`)
-            .join("\n")}`,
-          timestamp: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, sourcesMessage]);
-      }
     } catch (err: any) {
       console.error("Chat error:", err);
       setError(err.detail || "AI 응답을 가져오는데 실패했습니다.");
@@ -730,6 +737,24 @@ export default function ChatPage() {
                     {renderMessageContent(msg.content, msg.role)}
                   </div>
 
+                  {/* 참조 문서 버튼 (assistant 메시지 + sources 있을 때) */}
+                  {msg.role === "assistant" && msg.sources && msg.sources.length > 0 && (
+                    <div className="mt-3 flex items-center gap-2">
+                      <button
+                        onClick={() =>
+                          setSourcesModal({
+                            isOpen: true,
+                            sources: msg.sources || [],
+                          })
+                        }
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs bg-gray-700 hover:bg-gray-600 transition-colors"
+                      >
+                        <BookOpen className="w-3.5 h-3.5" />
+                        참조 문서 보기 ({msg.sources.length})
+                      </button>
+                    </div>
+                  )}
+
                   {/* Timestamp */}
                   {isClient && (
                     <div className="mt-2 flex items-center justify-end">
@@ -824,6 +849,31 @@ export default function ChatPage() {
             </div>
           )}
 
+          {/* 제안 문구 (초반에만 표시) */}
+          {messages.length === 1 && (
+            <div className="mb-4 space-y-2">
+              <div className="flex items-center gap-2 px-1 mb-2">
+                <Lightbulb className="w-4 h-4 text-yellow-400" />
+                <p className="text-xs text-gray-400">제안 질문을 선택하거나 직접 입력하세요</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {CHAT_SUGGESTIONS.map((suggestion, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => setInput(suggestion)}
+                    className={cn(
+                      "p-3 rounded-lg text-sm text-left transition-all border",
+                      "bg-gray-800/50 border-gray-700 hover:border-primary hover:bg-gray-700",
+                      "text-gray-300 hover:text-white"
+                    )}
+                  >
+                    <p className="line-clamp-2">{suggestion}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -859,6 +909,65 @@ export default function ChatPage() {
           </p>
         </div>
       </div>
+
+      {/* 참조 문서 모달 - 전체 텍스트를 보여주도록 개선됨 */}
+      {sourcesModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-4xl rounded-lg bg-gray-900 border border-gray-800 max-h-[90vh] flex flex-col shadow-2xl">
+            {/* 헤더 */}
+            <div className="sticky top-0 flex items-center justify-between border-b border-gray-800 bg-gray-800/50 p-6">
+              <div className="flex items-center gap-3">
+                <BookOpen className="w-5 h-5 text-blue-400" />
+                <h2 className="text-lg font-semibold text-white">참조 문서</h2>
+              </div>
+              <button
+                onClick={() => setSourcesModal({ isOpen: false, sources: [] })}
+                className="p-1 hover:bg-gray-700 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+
+            {/* 콘텐츠 - 스크롤 가능 영역 */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {sourcesModal.sources.length === 0 ? (
+                <p className="text-gray-400 text-center py-6">
+                  참조 문서가 없습니다.
+                </p>
+              ) : (
+                sourcesModal.sources.map((source, idx) => (
+                  <div
+                    key={idx}
+                    className="p-5 rounded-lg bg-gray-800/50 border border-gray-700 hover:border-gray-600 transition-colors"
+                  >
+                    <div className="flex gap-3">
+                      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 text-sm font-semibold">
+                        {idx + 1}
+                      </div>
+                      <div className="flex-1 min-w-0 overflow-hidden">
+                        {/* 전체 텍스트를 보여주기 위해 word-wrap 및 text-base 사용 */}
+                        <div className="text-base text-gray-100 leading-loose whitespace-pre-wrap break-words">
+                          {source}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* 푸터 */}
+            <div className="sticky bottom-0 border-t border-gray-800 bg-gray-800/50 p-4 flex justify-end">
+              <button
+                onClick={() => setSourcesModal({ isOpen: false, sources: [] })}
+                className="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium transition-colors"
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </DashboardLayout>
   );
 }

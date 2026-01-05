@@ -17,6 +17,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import {
@@ -34,7 +35,12 @@ import {
   AlertTriangle,
   X,
   Loader2,
+  ArrowLeft,
+  Code,
+  Database,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 // 분석 결과 타입
 interface AnalysisResult {
@@ -46,9 +52,21 @@ interface AnalysisResult {
   llm_provider: string;
   sources: string[];
   log_context?: string;
+  // Text-to-SQL 필드
+  llm_prompt?: string | null;
+  generated_sql?: string | null;
+  sql_execution_success?: boolean;
+  sql_execution_result?: string | null;
+  process_log?: string | null;
+  analysis_summary?: {
+    total_steps?: number;
+    sql_used?: boolean;
+    sql_success?: boolean;
+  };
 }
 
 export default function HistoryPage() {
+  const router = useRouter();
   const { theme } = useTheme();
   const [historyList, setHistoryList] = useState<AnalysisResult[]>([]);
   const [selectedItem, setSelectedItem] = useState<AnalysisResult | null>(null);
@@ -168,24 +186,40 @@ export default function HistoryPage() {
     <div className="p-6 space-y-6">
       {/* 헤더 */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1
+        <div className="flex items-center gap-3">
+          {/* 뒤로가기 버튼 */}
+          <button
+            onClick={() => router.back()}
             className={cn(
-              "text-2xl font-bold flex items-center gap-2",
-              theme === "dark" ? "text-white" : "text-gray-900"
+              "flex items-center justify-center p-2 rounded-lg transition-colors flex-shrink-0",
+              theme === "dark"
+                ? "hover:bg-gray-800 text-gray-400 hover:text-gray-200"
+                : "hover:bg-gray-100 text-gray-500 hover:text-gray-700"
             )}
+            title="뒤로가기"
           >
-            <History className="w-7 h-7" />
-            분석 히스토리
-          </h1>
-          <p
-            className={cn(
-              "text-sm mt-1",
-              theme === "dark" ? "text-gray-400" : "text-gray-500"
-            )}
-          >
-            채팅에서 수행된 AI 분석 결과가 저장됩니다
-          </p>
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+
+          <div>
+            <h1
+              className={cn(
+                "text-2xl font-bold flex items-center gap-2",
+                theme === "dark" ? "text-white" : "text-gray-900"
+              )}
+            >
+              <History className="w-7 h-7" />
+              분석 히스토리
+            </h1>
+            <p
+              className={cn(
+                "text-sm mt-1",
+                theme === "dark" ? "text-gray-400" : "text-gray-500"
+              )}
+            >
+              채팅에서 수행된 AI 분석 결과가 저장됩니다
+            </p>
+          </div>
         </div>
 
         {/* 버튼 그룹 */}
@@ -647,6 +681,31 @@ export default function HistoryPage() {
                 </div>
               )}
 
+              {/* LLM에게 보낸 프롬프트 */}
+              {selectedItem.llm_prompt && (
+                <div>
+                  <h3
+                    className={cn(
+                      "text-sm font-semibold mb-2 flex items-center gap-2",
+                      theme === "dark" ? "text-gray-300" : "text-gray-700"
+                    )}
+                  >
+                    <MessageSquare className="w-4 h-4" />
+                    LLM에게 보낸 프롬프트
+                  </h3>
+                  <div
+                    className={cn(
+                      "p-3 rounded-lg text-xs overflow-x-auto max-h-[200px] overflow-y-auto whitespace-pre-wrap",
+                      theme === "dark"
+                        ? "bg-gray-800 text-gray-300 border border-gray-700"
+                        : "bg-gray-100 text-gray-700 border border-gray-300"
+                    )}
+                  >
+                    {selectedItem.llm_prompt}
+                  </div>
+                </div>
+              )}
+
               {/* AI 응답 */}
               <div
                 className={cn(
@@ -660,15 +719,354 @@ export default function HistoryPage() {
                   <Brain className="w-5 h-5 text-blue-500" />
                   <h3 className="font-semibold text-blue-500">AI 분석 결과</h3>
                 </div>
-                <div
-                  className={cn(
-                    "text-sm whitespace-pre-wrap",
-                    theme === "dark" ? "text-gray-300" : "text-gray-700"
-                  )}
-                >
-                  {selectedItem.ai_response}
+                <div className="prose prose-sm max-w-none">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      // 코드 블록 스타일링
+                      code: ({ className, children, ...props }) => {
+                        const isInline = !className;
+                        return isInline ? (
+                          <code
+                            className={cn(
+                              "px-1.5 py-0.5 rounded text-xs",
+                              theme === "dark"
+                                ? "bg-gray-700 text-gray-200"
+                                : "bg-gray-200 text-gray-800"
+                            )}
+                            {...props}
+                          >
+                            {children}
+                          </code>
+                        ) : (
+                          <code
+                            className={cn(
+                              "block p-3 rounded-lg overflow-x-auto text-xs my-2",
+                              theme === "dark"
+                                ? "bg-gray-800 text-gray-200"
+                                : "bg-gray-100 text-gray-800"
+                            )}
+                            {...props}
+                          >
+                            {children}
+                          </code>
+                        );
+                      },
+                      // 테이블 스타일링
+                      table: ({ children }) => (
+                        <div className="overflow-x-auto my-2">
+                          <table
+                            className={cn(
+                              "min-w-full border-collapse border text-xs",
+                              theme === "dark"
+                                ? "border-gray-700"
+                                : "border-gray-300"
+                            )}
+                          >
+                            {children}
+                          </table>
+                        </div>
+                      ),
+                      th: ({ children }) => (
+                        <th
+                          className={cn(
+                            "border px-3 py-1.5 text-left font-semibold",
+                            theme === "dark"
+                              ? "bg-gray-800 border-gray-700 text-gray-200"
+                              : "bg-gray-100 border-gray-300 text-gray-900"
+                          )}
+                        >
+                          {children}
+                        </th>
+                      ),
+                      td: ({ children }) => (
+                        <td
+                          className={cn(
+                            "border px-3 py-1.5",
+                            theme === "dark"
+                              ? "border-gray-700 text-gray-300"
+                              : "border-gray-300 text-gray-700"
+                          )}
+                        >
+                          {children}
+                        </td>
+                      ),
+                      // 리스트 스타일링
+                      ul: ({ children }) => (
+                        <ul className="list-disc list-inside my-2 space-y-1">
+                          {children}
+                        </ul>
+                      ),
+                      ol: ({ children }) => (
+                        <ol className="list-decimal list-inside my-2 space-y-1">
+                          {children}
+                        </ol>
+                      ),
+                      // 헤딩 스타일링
+                      h1: ({ children }) => (
+                        <h1
+                          className={cn(
+                            "text-base font-bold mt-3 mb-2",
+                            theme === "dark" ? "text-gray-100" : "text-gray-900"
+                          )}
+                        >
+                          {children}
+                        </h1>
+                      ),
+                      h2: ({ children }) => (
+                        <h2
+                          className={cn(
+                            "text-sm font-bold mt-2 mb-1",
+                            theme === "dark" ? "text-gray-100" : "text-gray-900"
+                          )}
+                        >
+                          {children}
+                        </h2>
+                      ),
+                      h3: ({ children }) => (
+                        <h3
+                          className={cn(
+                            "text-xs font-bold mt-2 mb-1",
+                            theme === "dark" ? "text-gray-200" : "text-gray-800"
+                          )}
+                        >
+                          {children}
+                        </h3>
+                      ),
+                      // 인용문 스타일링
+                      blockquote: ({ children }) => (
+                        <blockquote
+                          className={cn(
+                            "border-l-4 pl-3 my-2 italic",
+                            theme === "dark"
+                              ? "border-blue-500 text-gray-400"
+                              : "border-blue-400 text-gray-600"
+                          )}
+                        >
+                          {children}
+                        </blockquote>
+                      ),
+                    }}
+                  >
+                    {selectedItem.ai_response}
+                  </ReactMarkdown>
                 </div>
               </div>
+
+              {/* Text-to-SQL 분석 과정 */}
+              {selectedItem.analysis_summary && (
+                <div
+                  className={cn(
+                    "p-4 rounded-xl border",
+                    theme === "dark"
+                      ? "bg-green-500/10 border-green-500/30"
+                      : "bg-green-50 border-green-200"
+                  )}
+                >
+                  <div className="flex items-center gap-2 mb-3">
+                    <FileText className="w-5 h-5 text-green-500" />
+                    <h3 className="font-semibold text-green-500">분석 과정 요약</h3>
+                  </div>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>
+                        총 처리 단계:
+                      </span>
+                      <span className={theme === "dark" ? "text-gray-200" : "text-gray-900"}>
+                        {selectedItem.analysis_summary.total_steps} 단계
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>
+                        SQL 생성:
+                      </span>
+                      <span
+                        className={cn(
+                          "font-medium",
+                          selectedItem.analysis_summary.sql_used
+                            ? "text-green-500"
+                            : "text-gray-500"
+                        )}
+                      >
+                        {selectedItem.analysis_summary.sql_used ? "✅ 생성됨" : "❌ 생성 안 됨"}
+                      </span>
+                    </div>
+                    {selectedItem.analysis_summary.sql_used && (
+                      <div className="flex justify-between">
+                        <span className={theme === "dark" ? "text-gray-400" : "text-gray-600"}>
+                          SQL 실행:
+                        </span>
+                        <span
+                          className={cn(
+                            "font-medium",
+                            selectedItem.analysis_summary.sql_success
+                              ? "text-green-500"
+                              : "text-red-500"
+                          )}
+                        >
+                          {selectedItem.analysis_summary.sql_success
+                            ? "✅ 성공"
+                            : "❌ 실패"}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* 생성된 SQL 쿼리 */}
+              {selectedItem.generated_sql && (
+                <div>
+                  <h3
+                    className={cn(
+                      "text-sm font-semibold mb-2 flex items-center gap-2",
+                      theme === "dark" ? "text-gray-300" : "text-gray-700"
+                    )}
+                  >
+                    <Code className="w-4 h-4" />
+                    생성된 SQL 쿼리
+                  </h3>
+                  <pre
+                    className={cn(
+                      "p-3 rounded-lg text-xs overflow-x-auto max-h-[150px] overflow-y-auto font-mono",
+                      theme === "dark"
+                        ? "bg-gray-800 text-gray-300 border border-gray-700"
+                        : "bg-gray-100 text-gray-700 border border-gray-300"
+                    )}
+                  >
+                    {selectedItem.generated_sql}
+                  </pre>
+                </div>
+              )}
+
+              {/* SQL 실행 결과 */}
+              {selectedItem.sql_execution_result && (
+                <div>
+                  <h3
+                    className={cn(
+                      "text-sm font-semibold mb-2 flex items-center gap-2",
+                      theme === "dark" ? "text-gray-300" : "text-gray-700"
+                    )}
+                  >
+                    <Database className="w-4 h-4" />
+                    SQL 실행 결과
+                  </h3>
+                  <div
+                    className={cn(
+                      "p-3 rounded-lg text-xs overflow-x-auto max-h-[150px] overflow-y-auto",
+                      theme === "dark"
+                        ? "bg-gray-800 text-gray-300 border border-gray-700"
+                        : "bg-gray-100 text-gray-700 border border-gray-300"
+                    )}
+                  >
+                    <pre className="font-mono">
+                      {typeof selectedItem.sql_execution_result === "string"
+                        ? selectedItem.sql_execution_result
+                        : JSON.stringify(selectedItem.sql_execution_result, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+              )}
+
+              {/* 분석 과정 로그 */}
+              {selectedItem.process_log && (
+                <div>
+                  <h3
+                    className={cn(
+                      "text-sm font-semibold mb-2 flex items-center gap-2",
+                      theme === "dark" ? "text-gray-300" : "text-gray-700"
+                    )}
+                  >
+                    <Clock className="w-4 h-4" />
+                    분석 과정 상세 로그
+                  </h3>
+                  <div
+                    className={cn(
+                      "space-y-2 max-h-[200px] overflow-y-auto",
+                      theme === "dark" ? "bg-gray-800" : "bg-gray-100"
+                    )}
+                  >
+                    {typeof selectedItem.process_log === "string" ? (
+                      (() => {
+                        try {
+                          const logs = JSON.parse(selectedItem.process_log);
+                          return (logs as Array<any>).map((log, idx) => (
+                            <div
+                              key={idx}
+                              className={cn(
+                                "p-2 rounded text-xs border",
+                                theme === "dark"
+                                  ? "bg-gray-700 border-gray-600 text-gray-300"
+                                  : "bg-gray-50 border-gray-300 text-gray-700"
+                              )}
+                            >
+                              <div className="font-semibold flex justify-between">
+                                <span>{log.step || "UNKNOWN"}</span>
+                                {log.duration_ms && (
+                                  <span className="text-gray-500">
+                                    {log.duration_ms}ms
+                                  </span>
+                                )}
+                              </div>
+                              {log.status && (
+                                <div>
+                                  Status: {log.status}
+                                </div>
+                              )}
+                              {log.success !== undefined && (
+                                <div>
+                                  Result:{" "}
+                                  <span
+                                    className={
+                                      log.success
+                                        ? "text-green-400"
+                                        : "text-red-400"
+                                    }
+                                  >
+                                    {log.success ? "✅ Success" : "❌ Failed"}
+                                  </span>
+                                </div>
+                              )}
+                              {log.rows_returned !== undefined && (
+                                <div>Rows: {log.rows_returned}</div>
+                              )}
+                              {log.error && (
+                                <div className="text-red-400">
+                                  Error: {log.error}
+                                </div>
+                              )}
+                            </div>
+                          ));
+                        } catch (e) {
+                          return (
+                            <div
+                              className={cn(
+                                "p-2 rounded text-xs",
+                                theme === "dark"
+                                  ? "bg-gray-700 text-gray-400"
+                                  : "bg-gray-50 text-gray-600"
+                              )}
+                            >
+                              (로그 파싱 실패)
+                            </div>
+                          );
+                        }
+                      })()
+                    ) : (
+                      <div
+                        className={cn(
+                          "p-2 rounded text-xs",
+                          theme === "dark"
+                            ? "bg-gray-700 text-gray-400"
+                            : "bg-gray-50 text-gray-600"
+                        )}
+                      >
+                        로그 데이터 없음
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* 참조 소스 */}
               {selectedItem.sources && selectedItem.sources.length > 0 && (

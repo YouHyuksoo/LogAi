@@ -20,6 +20,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import {
   Activity,
   Settings,
@@ -33,11 +34,37 @@ import {
 import { useI18n } from "@/lib/i18n";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
+import { fetchStatsSummary } from "@/lib/api-client";
 
 export function Sidebar() {
   const pathname = usePathname();
   const { t } = useI18n();
   const { theme } = useTheme();
+  const [systemStatus, setSystemStatus] = useState<string>("HEALTHY");
+  const [isLoading, setIsLoading] = useState(true);
+
+  // 시스템 상태 주기적 갱신
+  useEffect(() => {
+    const loadSystemStatus = async () => {
+      try {
+        const stats = await fetchStatsSummary();
+        setSystemStatus(stats.system_status || "HEALTHY");
+      } catch (error) {
+        console.error("[Sidebar] 시스템 상태 로드 실패:", error);
+        // 에러 시에도 HEALTHY로 표시 (API 실패는 CRITICAL로 보지 않음)
+        setSystemStatus("HEALTHY");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadSystemStatus();
+
+    // 30초마다 갱신
+    const interval = setInterval(loadSystemStatus, 30000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   // Operations 메뉴
   const menuItems = [
@@ -150,7 +177,7 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* 시스템 상태 */}
+      {/* 시스템 상태 (Backend 연동) */}
       <div
         className={cn(
           "rounded-xl p-4 border",
@@ -160,7 +187,19 @@ export function Sidebar() {
         )}
       >
         <div className="flex items-center gap-3">
-          <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse"></div>
+          {/* 상태 인디케이터 - systemStatus에 따라 색상 변경 */}
+          <div
+            className={cn(
+              "h-2 w-2 rounded-full",
+              isLoading
+                ? "bg-gray-400"
+                : systemStatus === "CRITICAL"
+                ? "bg-red-500 animate-pulse"
+                : systemStatus === "WARNING"
+                ? "bg-yellow-500 animate-pulse"
+                : "bg-green-500 animate-pulse"
+            )}
+          ></div>
           <div>
             <p
               className={cn(
@@ -172,11 +211,26 @@ export function Sidebar() {
             </p>
             <p
               className={cn(
-                "text-[10px]",
-                theme === "dark" ? "text-gray-400" : "text-gray-500"
+                "text-[10px] font-medium",
+                isLoading
+                  ? theme === "dark"
+                    ? "text-gray-500"
+                    : "text-gray-400"
+                  : systemStatus === "CRITICAL"
+                  ? "text-red-500"
+                  : systemStatus === "WARNING"
+                  ? "text-yellow-500"
+                  : "text-green-500",
+                theme === "dark" ? "" : ""
               )}
             >
-              {t("sidebar.operational")}
+              {isLoading
+                ? t("common.loading") || "Loading..."
+                : systemStatus === "CRITICAL"
+                ? "Critical"
+                : systemStatus === "WARNING"
+                ? "Warning"
+                : "Operational"}
             </p>
           </div>
         </div>

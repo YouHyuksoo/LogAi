@@ -1,32 +1,35 @@
 """
 @file backend/app/services/anomaly_detector.py
 @description
-규칙 기반 이상 탐지 모듈 (시간 조건 포함).
-ClickHouse에 저장된 규칙(키워드, 로그레벨, 빈도, 안전템플릿)을 기반으로 로그 이상을 탐지합니다.
+규칙 기반 + 벡터 기반 하이브리드 이상 탐지 모듈입니다.
+ClickHouse 규칙 + Qdrant 벡터 패턴 검색을 결합하여 탐지 정확도를 향상합니다.
 
 주요 기능:
 1. 규칙 로드: ClickHouse anomaly_rules 테이블에서 규칙 조회
-2. 실시간 탐지: 로그 레벨, 키워드, 템플릿 기반 이상 판정
-3. 빈도 탐지: N분 내 X회 이상 발생 시 이상 판정
-4. 시간 설정: 전역 설정 및 규칙별 설정 지원
-5. 이상 탐지 시 LangGraph Agent 트리거 (쿨다운 적용)
+2. 규칙 기반 탐지: 로그 레벨, 키워드, 템플릿, 빈도 기반 판정
+3. 벡터 기반 탐지: Qdrant 정상/비정상 패턴 유사도 검색 (Feature Flag)
+4. 하이브리드 의사결정: 규칙 + 벡터 결합 (우선순위 규칙 적용)
+5. 시간 설정: 전역 설정 및 규칙별 설정 지원
+6. 이상 탐지 시 LangGraph Agent 트리거 (쿨다운 적용)
 
 규칙 타입:
-- level: 로그 레벨 기반 (ERROR, CRITICAL → 즉시 이상)
+- level: 로그 레벨 기반 (ERROR, CRITICAL → 절대 이상)
 - keyword: 키워드 매칭 (Recog error, Placement error 등)
 - frequency: 빈도 기반 (N분 내 X회 이상 발생)
 - safe_template: 무시할 정상 템플릿 (화이트리스트)
+- vector: 벡터 기반 유사도 (Feature Flag 활성화 시)
 
-시간 설정:
-- time_window_minutes: 탐지 시간 윈도우 (기본 5분)
-- threshold_count: 발생 횟수 임계값 (기본 1회)
-- cooldown_minutes: 규칙별 쿨다운 (기본 30분)
+하이브리드 의사결정 우선순위:
+1. ERROR/CRITICAL → 무조건 이상 (규칙 절대 우선)
+2. 규칙=이상 & 벡터=정상(신뢰도 > 0.9) → 규칙 우선 + 경고
+3. 규칙=정상 & 벡터=이상(신뢰도 > 0.8) → 벡터 우선
+4. 규칙=unknown → 벡터 결과 사용
 
 사용법:
   from app.services.anomaly_detector import detector
 
-  # 단일 로그 검사
-  result = detector.check_log(level, template_id, message)
+  # 단일 로그 검사 (비동기)
+  result = await detector.check_log_async(level, template_id, message)
 
   # 배치 탐지 (컨슈머에서 호출)
   detector.detect()
@@ -39,6 +42,7 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass, field
 from collections import defaultdict
 from app.services.clickhouse_client import ch_client
+from app.core.config import settings as app_settings
 
 # Logging Setup (시간 포함 포맷)
 logger = logging.getLogger("anomaly_detector")
@@ -137,6 +141,10 @@ class RuleBasedAnomalyDetector:
 
         # 마지막으로 처리한 로그의 timestamp 추적 (중복 방지)
         self._last_processed_timestamp: Optional[datetime] = None
+
+        # 벡터 분류기 (동적 import, 나중에 필요시 로드)
+        self._pattern_classifier = None
+        self._vector_enabled = app_settings.VECTOR_CLASSIFICATION_ENABLED
 
         # 초기 로드
         self._load_settings()
@@ -289,6 +297,18 @@ class RuleBasedAnomalyDetector:
 
         return False, count
 
+    def _get_pattern_classifier(self):
+        """패턴 분류기 지연 로드 (circular import 방지)"""
+        if self._pattern_classifier is None and self._vector_enabled:
+            try:
+                from app.services.pattern_classifier import pattern_classifier
+                self._pattern_classifier = pattern_classifier
+                logger.info("✅ 패턴 분류기 로드 완료")
+            except ImportError as e:
+                logger.warning(f"⚠️ 패턴 분류기 로드 실패: {e}")
+                self._pattern_classifier = False  # 빈 값으로 설정 (재시도 하지 않음)
+        return self._pattern_classifier if self._pattern_classifier else None
+
     def _is_on_cooldown(self, rule: AnomalyRule, template_id: int) -> bool:
         """
         규칙별 쿨다운 확인
@@ -359,6 +379,155 @@ class RuleBasedAnomalyDetector:
             logger.warning(f"⚠️ 분당 이상 탐지 제한 초과 ({count}/{self._settings.max_anomalies_per_minute})")
             return True
         return False
+
+    async def check_log_async(
+        self,
+        level: str,
+        template_id: int,
+        message: str,
+        service: Optional[str] = None
+    ) -> AnomalyResult:
+        """
+        비동기 하이브리드 이상 탐지 (규칙 + 벡터 결합)
+
+        프로세스:
+        1. 규칙 기반 탐지 (기존)
+        2. 벡터 기반 탐지 (Feature Flag 활성화 시)
+        3. 하이브리드 의사결정 (우선순위 규칙 적용)
+        4. ClickHouse에 분류 결과 저장
+
+        Args:
+            level: 로그 레벨 (INFO, WARN, ERROR, CRITICAL)
+            template_id: Drain3 템플릿 ID
+            message: 원본 로그 메시지
+            service: 서비스 이름 (선택)
+
+        Returns:
+            AnomalyResult: 최종 이상 탐지 결과
+        """
+        # 1. 규칙 기반 탐지 (동기)
+        rule_result = self.check_log(level, template_id, message)
+
+        # 2. 벡터 기반 탐지 (활성화 시)
+        vector_result = None
+        if self._vector_enabled:
+            classifier = self._get_pattern_classifier()
+            if classifier:
+                try:
+                    vector_result = await classifier.classify_log(
+                        template_id=template_id,
+                        message=message,
+                        log_level=level,
+                        service=service
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ 벡터 분류 실패: {e}")
+                    vector_result = None
+
+        # 3. 하이브리드 의사결정
+        final_result = self._make_hybrid_decision(
+            rule_result,
+            vector_result,
+            template_id,
+            message
+        )
+
+        # 4. ClickHouse에 분류 결과 저장
+        if vector_result:
+            try:
+                ch_client.insert_classification_result(
+                    timestamp=datetime.now(),
+                    template_id=template_id,
+                    log_message=message[:200],
+                    classification=vector_result.classification.value,
+                    confidence=vector_result.confidence,
+                    matched_pattern_id=vector_result.matched_pattern_id or "",
+                    rule_based_result=f"{rule_result.rule_type}={rule_result.rule_value}",
+                    final_decision=final_result.rule_type,
+                    decision_reason=final_result.description
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ 분류 결과 저장 실패: {e}")
+
+        return final_result
+
+    def _make_hybrid_decision(
+        self,
+        rule_result: AnomalyResult,
+        vector_result,
+        template_id: int,
+        message: str
+    ) -> AnomalyResult:
+        """
+        규칙 + 벡터 결과를 결합하여 최종 판정을 내립니다.
+
+        우선순위:
+        1. ERROR/CRITICAL → 무조건 이상 (규칙 절대 우선)
+        2. 규칙=이상 & 벡터=정상(신뢰도 > 0.9) → 규칙 우선 + 경고
+        3. 규칙=정상 & 벡터=이상(신뢰도 > 0.8) → 벡터 우선
+        4. 규칙=unknown → 벡터 결과 사용
+
+        Args:
+            rule_result: 규칙 기반 결과
+            vector_result: 벡터 기반 결과 (None 가능)
+            template_id: 템플릿 ID
+            message: 로그 메시지
+
+        Returns:
+            AnomalyResult: 최종 판정 결과
+        """
+        # 규칙이 없으면 그대로 반환
+        if vector_result is None:
+            return rule_result
+
+        # 우선순위 1: ERROR/CRITICAL → 절대 이상
+        if rule_result.rule_type == "level" and rule_result.rule_value in ["ERROR", "CRITICAL"]:
+            return rule_result
+
+        # 우선순위 2: 규칙=이상 & 벡터=정상(고신뢰) → 규칙 우선 + 경고
+        if (rule_result.is_anomaly and
+            vector_result.classification.value == "normal" and
+            vector_result.confidence > 0.9):
+
+            logger.warning(
+                f"⚠️ 분류 충돌 (template={template_id}): "
+                f"규칙={rule_result.rule_type}, 벡터={vector_result.classification.value}(신뢰={vector_result.confidence:.2f}) "
+                f"→ 규칙 우선"
+            )
+            return rule_result
+
+        # 우선순위 3: 규칙=정상 & 벡터=이상(고신뢰) → 벡터 우선
+        if (not rule_result.is_anomaly and
+            vector_result.classification.value == "anomaly" and
+            vector_result.confidence > 0.8):
+
+            logger.info(
+                f"🔄 벡터 판정 우선 (template={template_id}): "
+                f"벡터={vector_result.classification.value}(신뢰={vector_result.confidence:.2f})"
+            )
+            return AnomalyResult(
+                is_anomaly=True,
+                rule_type="vector",
+                rule_value=vector_result.matched_pattern_id or "unknown",
+                severity="warning",
+                score=vector_result.confidence,
+                description=vector_result.decision_reason
+            )
+
+        # 우선순위 4: 규칙=unknown → 벡터 사용
+        if rule_result.rule_type == "unknown" and vector_result:
+            if vector_result.classification.value == "anomaly":
+                return AnomalyResult(
+                    is_anomaly=True,
+                    rule_type="vector",
+                    rule_value=vector_result.matched_pattern_id or "unknown",
+                    severity="info",
+                    score=vector_result.confidence,
+                    description=vector_result.decision_reason
+                )
+
+        # 기본: 규칙 결과 반환
+        return rule_result
 
     def check_log(
         self,

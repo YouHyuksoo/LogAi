@@ -21,6 +21,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { useI18n } from "@/lib/i18n";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -41,6 +42,7 @@ import {
   Eye,
   X,
   Trash2,
+  ArrowLeft,
 } from "lucide-react";
 
 // API에서 받아오는 이상 탐지 데이터 타입
@@ -54,6 +56,13 @@ interface AnomalyData {
   raw_message?: string; // 원본 로그 메시지
   log_level?: string; // 로그 레벨
   service?: string; // 서비스명
+  agent_analysis_result?: string; // AI 분석 결과
+  agent_root_cause?: string; // 근본 원인
+  agent_recommendation?: string; // 권장사항
+  agent_process_log?: string; // 프로세스 로그
+  resolution?: string; // 해결 내용
+  resolved_by?: string; // 해결자
+  resolved_at?: string; // 해결 시간
 }
 
 // 프론트엔드에서 사용하는 인시던트 타입
@@ -75,6 +84,9 @@ interface Incident {
   rawMessage: string; // 원본 로그 메시지 (logs 테이블과의 JOIN 결과)
   logLevel: string; // 로그 레벨 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
   service: string; // 서비스명
+  resolution?: string; // 해결 내용
+  resolvedBy?: string; // 해결자
+  resolvedAt?: string; // 해결 시간
 }
 
 // 통계 요약 데이터 타입
@@ -314,21 +326,25 @@ function convertToIncident(anomaly: AnomalyData, index: number): Incident {
     rawMessage: anomaly.raw_message || "", // 원본 로그 메시지
     logLevel: anomaly.log_level || "", // 로그 레벨
     service: anomaly.service || "", // 서비스명
-    aiAnalysis: severity === "critical"
+    aiAnalysis: anomaly.agent_analysis_result || (severity === "critical"
       ? `이상 점수 ${(anomaly.anomaly_score * 100).toFixed(1)}%로 높은 이상치가 감지되었습니다. Template ID ${anomaly.template_id}에서 비정상적인 패턴이 발견되었으며, 즉각적인 점검이 필요합니다.`
       : severity === "warning"
       ? `이상 점수 ${(anomaly.anomaly_score * 100).toFixed(1)}%로 주의가 필요한 상태입니다. 지속적인 모니터링을 권장합니다.`
-      : undefined,
-    rootCause: severity !== "info" ? `Template ID ${anomaly.template_id} 패턴 이상` : undefined,
-    recommendation: severity === "critical"
+      : undefined),
+    rootCause: anomaly.agent_root_cause || (severity !== "info" ? `Template ID ${anomaly.template_id} 패턴 이상` : undefined),
+    recommendation: anomaly.agent_recommendation || (severity === "critical"
       ? "1. 해당 설비 즉시 점검\n2. 관련 로그 상세 분석\n3. 유사 패턴 과거 이력 조사"
       : severity === "warning"
       ? "1. 추이 모니터링 강화\n2. 임계값 도달 시 알림 설정"
-      : undefined,
+      : undefined),
+    resolution: anomaly.resolution,
+    resolvedBy: anomaly.resolved_by,
+    resolvedAt: anomaly.resolved_at,
   };
 }
 
 export default function AnalysisPage() {
+  const router = useRouter();
   const { t } = useI18n();
   const { theme } = useTheme();
 
@@ -351,6 +367,11 @@ export default function AnalysisPage() {
   // 상태 업데이트 관련 상태
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  // 해결 모달 관련 상태
+  const [showResolutionModal, setShowResolutionModal] = useState(false);
+  const [resolutionForm, setResolutionForm] = useState({ resolution: "", resolvedBy: "" });
+  const [isSubmittingResolution, setIsSubmittingResolution] = useState(false);
 
   // 페이지네이션 상태
   const [currentPage, setCurrentPage] = useState(1);
@@ -488,6 +509,14 @@ export default function AnalysisPage() {
     setStatusMessage(null);
 
     try {
+      // 해결 상태로 변경 시 모달 열기
+      if (newStatus === "resolved") {
+        setShowResolutionModal(true);
+        setResolutionForm({ resolution: "", resolvedBy: "" });
+        setIsUpdatingStatus(false);
+        return;
+      }
+
       const response = await fetch(
         `http://localhost:8000/api/v1/analysis/anomalies/${encodeURIComponent(timestamp)}/status`,
         {
@@ -528,6 +557,82 @@ export default function AnalysisPage() {
       });
     } finally {
       setIsUpdatingStatus(false);
+    }
+  };
+
+  /**
+   * 해결 정보 제출 핸들러
+   */
+  const handleSubmitResolution = async () => {
+    if (!selectedIncident || !resolutionForm.resolution || !resolutionForm.resolvedBy) {
+      setStatusMessage({
+        type: "error",
+        text: "해결 내용과 해결자를 모두 입력해주세요",
+      });
+      return;
+    }
+
+    setIsSubmittingResolution(true);
+
+    try {
+      const response = await fetch(
+        `http://localhost:8000/api/v1/analysis/anomalies/${encodeURIComponent(
+          selectedIncident.originalTimestamp
+        )}/resolve`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            resolution: resolutionForm.resolution,
+            resolved_by: resolutionForm.resolvedBy,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || "해결 정보 저장 실패");
+      }
+
+      const result = await response.json();
+
+      // 인시던트 목록 및 선택된 인시던트 업데이트
+      setIncidents((prev) =>
+        prev.map((item) =>
+          item.originalTimestamp === selectedIncident.originalTimestamp
+            ? {
+                ...item,
+                status: "resolved",
+                resolution: resolutionForm.resolution,
+                resolvedBy: resolutionForm.resolvedBy,
+                resolvedAt: new Date().toISOString(),
+              }
+            : item
+        )
+      );
+
+      if (selectedIncident) {
+        setSelectedIncident({
+          ...selectedIncident,
+          status: "resolved",
+          resolution: resolutionForm.resolution,
+          resolvedBy: resolutionForm.resolvedBy,
+          resolvedAt: new Date().toISOString(),
+        });
+      }
+
+      setStatusMessage({ type: "success", text: result.message });
+      setShowResolutionModal(false);
+
+      // 3초 후 메시지 제거
+      setTimeout(() => setStatusMessage(null), 3000);
+    } catch (err) {
+      setStatusMessage({
+        type: "error",
+        text: err instanceof Error ? err.message : "해결 정보 저장 중 오류 발생",
+      });
+    } finally {
+      setIsSubmittingResolution(false);
     }
   };
 
@@ -603,19 +708,35 @@ export default function AnalysisPage() {
     <div className="p-6 space-y-6">
       {/* 헤더 */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 className={cn(
-            "text-2xl font-bold",
-            theme === "dark" ? "text-white" : "text-gray-900"
-          )}>
-            {t("analysis.title")}
-          </h1>
-          <p className={cn(
-            "text-sm mt-1",
-            theme === "dark" ? "text-gray-400" : "text-gray-500"
-          )}>
-            {t("analysis.subtitle")}
-          </p>
+        <div className="flex items-center gap-4">
+          {/* 뒤로가기 버튼 */}
+          <button
+            onClick={() => router.back()}
+            className={cn(
+              "flex items-center justify-center p-2 rounded-lg transition-colors",
+              theme === "dark"
+                ? "hover:bg-gray-800 text-gray-400 hover:text-gray-200"
+                : "hover:bg-gray-100 text-gray-500 hover:text-gray-700"
+            )}
+            title="뒤로가기"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+
+          <div>
+            <h1 className={cn(
+              "text-2xl font-bold",
+              theme === "dark" ? "text-white" : "text-gray-900"
+            )}>
+              {t("analysis.title")}
+            </h1>
+            <p className={cn(
+              "text-sm mt-1",
+              theme === "dark" ? "text-gray-400" : "text-gray-500"
+            )}>
+              {t("analysis.subtitle")}
+            </p>
+          </div>
         </div>
 
         {/* 버튼 그룹 */}
@@ -1468,6 +1589,73 @@ export default function AnalysisPage() {
                   )}
                 </div>
               )}
+
+              {/* 해결 정보 표시 */}
+              {selectedIncident.status === "resolved" && selectedIncident.resolution && (
+                <div className={cn(
+                  "p-4 rounded-xl border",
+                  theme === "dark"
+                    ? "bg-green-500/10 border-green-500/30"
+                    : "bg-green-50 border-green-200"
+                )}>
+                  <div className="flex items-center gap-2 mb-3">
+                    <CheckCircle className="w-5 h-5 text-green-500" />
+                    <h3 className="font-semibold text-green-500">
+                      해결 정보
+                    </h3>
+                  </div>
+
+                  {/* 해결 내용 */}
+                  <div className="mb-4">
+                    <h4 className={cn(
+                      "text-xs font-semibold mb-1",
+                      theme === "dark" ? "text-gray-400" : "text-gray-500"
+                    )}>
+                      해결 내용
+                    </h4>
+                    <p className={cn(
+                      "text-sm whitespace-pre-wrap",
+                      theme === "dark" ? "text-white" : "text-gray-900"
+                    )}>
+                      {selectedIncident.resolution}
+                    </p>
+                  </div>
+
+                  {/* 메타 정보 */}
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className={cn(
+                        "text-xs mb-1",
+                        theme === "dark" ? "text-gray-500" : "text-gray-400"
+                      )}>
+                        해결자
+                      </p>
+                      <p className={cn(
+                        "font-medium",
+                        theme === "dark" ? "text-white" : "text-gray-900"
+                      )}>
+                        {selectedIncident.resolvedBy || "-"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className={cn(
+                        "text-xs mb-1",
+                        theme === "dark" ? "text-gray-500" : "text-gray-400"
+                      )}>
+                        해결 시간
+                      </p>
+                      <p className={cn(
+                        "font-medium",
+                        theme === "dark" ? "text-white" : "text-gray-900"
+                      )}>
+                        {selectedIncident.resolvedAt
+                          ? new Date(selectedIncident.resolvedAt).toLocaleString("ko-KR")
+                          : "-"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div className={cn(
@@ -1685,6 +1873,151 @@ export default function AnalysisPage() {
                   <>
                     <Trash2 className="w-4 h-4" />
                     전체 삭제
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 해결 정보 입력 모달 */}
+      {showResolutionModal && selectedIncident && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          {/* 배경 오버레이 */}
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => !isSubmittingResolution && setShowResolutionModal(false)}
+          />
+
+          {/* 모달 */}
+          <div className={cn(
+            "relative w-full max-w-md mx-4 p-6 rounded-xl shadow-2xl",
+            theme === "dark" ? "bg-gray-900 border border-gray-800" : "bg-white"
+          )}>
+            {/* 닫기 버튼 */}
+            <button
+              onClick={() => !isSubmittingResolution && setShowResolutionModal(false)}
+              disabled={isSubmittingResolution}
+              className={cn(
+                "absolute top-4 right-4 p-1 rounded-lg transition-colors",
+                theme === "dark"
+                  ? "hover:bg-gray-800 text-gray-400"
+                  : "hover:bg-gray-100 text-gray-500",
+                isSubmittingResolution && "opacity-50 cursor-not-allowed"
+              )}
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* 제목 */}
+            <h3 className={cn(
+              "text-lg font-bold mb-4",
+              theme === "dark" ? "text-white" : "text-gray-900"
+            )}>
+              해결 정보 입력
+            </h3>
+
+            {/* 인시던트 정보 */}
+            <div className={cn(
+              "p-3 rounded-lg mb-4",
+              theme === "dark" ? "bg-gray-800" : "bg-gray-50"
+            )}>
+              <p className={cn(
+                "text-sm font-medium",
+                theme === "dark" ? "text-gray-300" : "text-gray-700"
+              )}>
+                {selectedIncident.title}
+              </p>
+              <p className={cn(
+                "text-xs mt-1",
+                theme === "dark" ? "text-gray-500" : "text-gray-500"
+              )}>
+                {selectedIncident.timestamp}
+              </p>
+            </div>
+
+            {/* 해결 내용 입력 */}
+            <div className="mb-4">
+              <label className={cn(
+                "block text-sm font-medium mb-2",
+                theme === "dark" ? "text-gray-300" : "text-gray-700"
+              )}>
+                해결 내용 *
+              </label>
+              <textarea
+                value={resolutionForm.resolution}
+                onChange={(e) => setResolutionForm({ ...resolutionForm, resolution: e.target.value })}
+                disabled={isSubmittingResolution}
+                placeholder="해결 방법, 조치 사항 등을 입력해주세요"
+                className={cn(
+                  "w-full p-3 rounded-lg border text-sm resize-none",
+                  theme === "dark"
+                    ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500"
+                    : "bg-gray-50 border-gray-200 text-gray-900 placeholder-gray-400",
+                  isSubmittingResolution && "opacity-50 cursor-not-allowed"
+                )}
+                rows={4}
+              />
+            </div>
+
+            {/* 해결자 입력 */}
+            <div className="mb-6">
+              <label className={cn(
+                "block text-sm font-medium mb-2",
+                theme === "dark" ? "text-gray-300" : "text-gray-700"
+              )}>
+                해결자 (담당자) *
+              </label>
+              <input
+                type="text"
+                value={resolutionForm.resolvedBy}
+                onChange={(e) => setResolutionForm({ ...resolutionForm, resolvedBy: e.target.value })}
+                disabled={isSubmittingResolution}
+                placeholder="담당자 이름을 입력해주세요"
+                className={cn(
+                  "w-full px-3 py-2 rounded-lg border text-sm",
+                  theme === "dark"
+                    ? "bg-gray-800 border-gray-700 text-white placeholder-gray-500"
+                    : "bg-gray-50 border-gray-200 text-gray-900 placeholder-gray-400",
+                  isSubmittingResolution && "opacity-50 cursor-not-allowed"
+                )}
+              />
+            </div>
+
+            {/* 버튼 */}
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowResolutionModal(false)}
+                disabled={isSubmittingResolution}
+                className={cn(
+                  "flex-1 px-4 py-2.5 rounded-lg font-medium transition-colors",
+                  theme === "dark"
+                    ? "bg-gray-800 hover:bg-gray-700 text-gray-300"
+                    : "bg-gray-100 hover:bg-gray-200 text-gray-700",
+                  isSubmittingResolution && "opacity-50 cursor-not-allowed"
+                )}
+              >
+                취소
+              </button>
+              <button
+                onClick={handleSubmitResolution}
+                disabled={isSubmittingResolution}
+                className={cn(
+                  "flex-1 px-4 py-2.5 rounded-lg font-medium transition-colors flex items-center justify-center gap-2",
+                  "bg-green-500 hover:bg-green-600 text-white",
+                  isSubmittingResolution && "opacity-70 cursor-not-allowed"
+                )}
+              >
+                {isSubmittingResolution ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    저장 중...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="w-4 h-4" />
+                    저장
                   </>
                 )}
               </button>

@@ -44,6 +44,7 @@ COPY . .
 
 # Next.js 빌드 (standalone 모드)
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_STANDALONE=true
 RUN npm run build
 
 # Stage 3: Runner (프로덕션 이미지)
