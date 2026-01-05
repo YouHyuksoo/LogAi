@@ -67,4 +67,11 @@ class Settings:
     QDRANT_HOST: str = os.getenv("QDRANT_HOST", "localhost")
     QDRANT_PORT: int = int(os.getenv("QDRANT_PORT", 6333))
 
+    # 로그 저장 필터링 정책
+    # "all" - 모든 로그 저장
+    # "anomaly-only" - 이상 탐지된 로그만 저장
+    # "error-only" - ERROR 레벨 로그만 저장
+    # "error-warning" - ERROR, WARNING 레벨만 저장
+    LOG_STORAGE_POLICY: str = os.getenv("LOG_STORAGE_POLICY", "all")
+
 settings = Settings()

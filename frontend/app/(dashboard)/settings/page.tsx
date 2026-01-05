@@ -26,12 +26,35 @@
 export const dynamic = "force-dynamic";
 
 import { useState, useEffect } from "react";
-import { Save, Server, Cloud, Cpu, Lock, Check, Moon, Sun, Bell, RefreshCw, Database, Send, Loader2, Trash2, ExternalLink } from "lucide-react";
+import {
+  Save,
+  Server,
+  Cloud,
+  Cpu,
+  Lock,
+  Check,
+  Moon,
+  Sun,
+  Bell,
+  RefreshCw,
+  Database,
+  Send,
+  Loader2,
+  Trash2,
+  ExternalLink,
+  Filter,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/theme";
 import { useI18n } from "@/lib/i18n";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
-import type { Settings, LLMProvider, EmbeddingProvider, ThemeMode } from "@/lib/types";
+import type {
+  Settings,
+  LLMProvider,
+  EmbeddingProvider,
+  ThemeMode,
+  LogStoragePolicy,
+} from "@/lib/types";
 import { DEFAULT_SETTINGS } from "@/lib/types";
 import {
   fetchSlackSettings,
@@ -39,6 +62,10 @@ import {
   toggleSlackNotifications,
   sendSlackTestMessage,
   deleteSlackWebhook,
+  getAllSettings,
+  updateAllSettings,
+  getLogStoragePolicy,
+  setLogStoragePolicy,
   type SlackSettings,
 } from "@/lib/api-client";
 
@@ -51,28 +78,53 @@ export default function SettingsPage() {
   // ==================== State ====================
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [isSaved, setIsSaved] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Slack 설정 상태
-  const [slackSettings, setSlackSettings] = useState<SlackSettings | null>(null);
+  const [slackSettings, setSlackSettings] = useState<SlackSettings | null>(
+    null
+  );
   const [webhookUrl, setWebhookUrl] = useState("");
   const [isSlackLoading, setIsSlackLoading] = useState(false);
-  const [slackMessage, setSlackMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [slackMessage, setSlackMessage] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+
+  // 로그 저장 정책 상태
+  const [logPolicySaving, setLogPolicySaving] = useState(false);
+  const [logPolicyMessage, setLogPolicyMessage] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+
+  // AI 채팅 페르소나 상태
+  const [welcomeMessage, setWelcomeMessage] = useState<string>("");
+  const WELCOME_MESSAGE_KEY = "logai_chat_welcome_message";
 
   // ==================== Effects ====================
 
   /**
-   * 컴포넌트 마운트 시 localStorage에서 설정 로드
+   * 컴포넌트 마운트 시 Backend에서 설정 로드
    */
   useEffect(() => {
-    const loadSettings = () => {
+    const loadSettings = async () => {
       try {
-        const stored = localStorage.getItem(SETTINGS_KEY);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          setSettings({ ...DEFAULT_SETTINGS, ...parsed });
-        }
+        const result = await getAllSettings();
+        setSettings((prev) => ({
+          ...prev,
+          llmProvider: result.data.llmProvider as LLMProvider,
+          embeddingProvider: result.data.embeddingProvider as EmbeddingProvider,
+          anomalyThreshold: result.data.anomalyThreshold,
+          theme: result.data.theme as ThemeMode,
+          notificationsEnabled: result.data.notificationsEnabled,
+          autoRefresh: result.data.autoRefresh,
+          refreshInterval: result.data.refreshInterval,
+          logStoragePolicy: result.data.logStoragePolicy as LogStoragePolicy,
+        }));
       } catch (error) {
-        console.error("Failed to load settings:", error);
+        console.error("Failed to load settings from Backend:", error);
+        // Backend 실패 시 기본값 사용
       }
     };
 
@@ -95,6 +147,42 @@ export default function SettingsPage() {
     loadSlackSettings();
   }, []);
 
+  /**
+   * 로그 저장 정책 로드
+   */
+  useEffect(() => {
+    const loadLogStoragePolicy = async () => {
+      try {
+        const result = await getLogStoragePolicy();
+        setSettings((prev) => ({
+          ...prev,
+          logStoragePolicy: result.log_storage_policy as LogStoragePolicy,
+        }));
+      } catch (error) {
+        console.error("Failed to load log storage policy:", error);
+      }
+    };
+
+    loadLogStoragePolicy();
+  }, []);
+
+  /**
+   * AI 채팅 환영 메시지 로드
+   */
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(WELCOME_MESSAGE_KEY);
+      if (stored) {
+        setWelcomeMessage(stored);
+      } else {
+        setWelcomeMessage(t("chat.welcomeMessageDefault"));
+      }
+    } catch (error) {
+      console.error("Failed to load welcome message:", error);
+      setWelcomeMessage(t("chat.welcomeMessageDefault"));
+    }
+  }, [t]);
+
   // ==================== Handlers ====================
 
   /**
@@ -115,7 +203,10 @@ export default function SettingsPage() {
       setWebhookUrl("");
       setSlackMessage({ type: "success", text: result.message });
     } catch (error: any) {
-      setSlackMessage({ type: "error", text: error.detail || "설정 저장 실패" });
+      setSlackMessage({
+        type: "error",
+        text: error.detail || "설정 저장 실패",
+      });
     } finally {
       setIsSlackLoading(false);
     }
@@ -129,11 +220,16 @@ export default function SettingsPage() {
 
     setIsSlackLoading(true);
     try {
-      const result = await toggleSlackNotifications(!slackSettings.notifications_enabled);
+      const result = await toggleSlackNotifications(
+        !slackSettings.notifications_enabled
+      );
       setSlackSettings(result.settings);
       setSlackMessage({ type: "success", text: result.message });
     } catch (error: any) {
-      setSlackMessage({ type: "error", text: error.detail || "설정 변경 실패" });
+      setSlackMessage({
+        type: "error",
+        text: error.detail || "설정 변경 실패",
+      });
     } finally {
       setIsSlackLoading(false);
     }
@@ -153,7 +249,10 @@ export default function SettingsPage() {
         text: result.message,
       });
     } catch (error: any) {
-      setSlackMessage({ type: "error", text: error.detail || "테스트 발송 실패" });
+      setSlackMessage({
+        type: "error",
+        text: error.detail || "테스트 발송 실패",
+      });
     } finally {
       setIsSlackLoading(false);
     }
@@ -182,20 +281,22 @@ export default function SettingsPage() {
   };
 
   /**
-   * 설정 저장 (localStorage)
+   * 설정 저장 (Backend API → .env 파일)
    */
-  const handleSave = () => {
+  const handleSave = async () => {
+    setIsSaving(true);
     try {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+      const result = await updateAllSettings(settings);
       setIsSaved(true);
+      console.log("Settings saved to Backend:", result);
 
       // 2초 후 저장 완료 메시지 제거
       setTimeout(() => setIsSaved(false), 2000);
-
-      console.log("Settings saved:", settings);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to save settings:", error);
-      alert("설정 저장에 실패했습니다.");
+      alert(error.detail || "설정 저장에 실패했습니다.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -232,7 +333,10 @@ export default function SettingsPage() {
    * 알림 토글
    */
   const toggleNotifications = () => {
-    setSettings((prev) => ({ ...prev, notificationsEnabled: !prev.notificationsEnabled }));
+    setSettings((prev) => ({
+      ...prev,
+      notificationsEnabled: !prev.notificationsEnabled,
+    }));
   };
 
   /**
@@ -242,576 +346,812 @@ export default function SettingsPage() {
     setSettings((prev) => ({ ...prev, autoRefresh: !prev.autoRefresh }));
   };
 
+  /**
+   * AI 채팅 환영 메시지 저장
+   */
+  const handleSaveWelcomeMessage = () => {
+    try {
+      localStorage.setItem(WELCOME_MESSAGE_KEY, welcomeMessage);
+      setIsSaved(true);
+      setTimeout(() => setIsSaved(false), 2000);
+      console.log("Welcome message saved:", welcomeMessage);
+    } catch (error) {
+      console.error("Failed to save welcome message:", error);
+      alert("환영 메시지 저장에 실패했습니다.");
+    }
+  };
+
+  /**
+   * AI 채팅 환영 메시지 기본값 복원
+   */
+  const handleResetWelcomeMessage = () => {
+    if (confirm("환영 메시지를 기본값으로 복원하시겠습니까?")) {
+      setWelcomeMessage(t("chat.welcomeMessageDefault"));
+    }
+  };
+
   // ==================== Render ====================
 
   return (
     <DashboardLayout>
-    <div className="max-w-4xl mx-auto space-y-8">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-white mb-2">시스템 설정</h1>
-        <p className="text-gray-400">
-          AI 엔진, 이상 탐지 Threshold, 알림 설정을 관리합니다.
-        </p>
-      </div>
-
-      {/* LLM Provider Section */}
-      <div className="glass-panel p-6 rounded-xl space-y-6">
-        <div className="flex items-center gap-3 border-b border-gray-800 pb-4">
-          <Cpu className="h-6 w-6 text-primary" />
-          <h2 className="text-lg font-semibold text-white">
-            AI 추론 엔진 설정
-          </h2>
-        </div>
-
-        <div className="grid md:grid-cols-4 gap-4">
-          {/* Local (vLLM) Option */}
-          <button
-            onClick={() => handleProviderChange("local")}
-            className={cn(
-              "relative flex flex-col p-4 rounded-xl border transition-all",
-              settings.llmProvider === "local"
-                ? "border-primary bg-primary/10"
-                : "border-gray-700 bg-gray-900/50 hover:border-gray-600"
-            )}
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <Server
-                className={cn(
-                  "h-5 w-5",
-                  settings.llmProvider === "local" ? "text-primary" : "text-gray-400"
-                )}
-              />
-              <span className="font-semibold text-white text-sm">
-                온프레미스 (vLLM)
-              </span>
-            </div>
-            <p className="text-xs text-gray-400 text-left">
-              GPU에서 로컬 실행. 데이터가 외부로 전송되지 않습니다.
-              <br />
-              <span className="text-green-500 font-medium">
-                보안 최우수
-              </span>
-            </p>
-            {settings.llmProvider === "local" && (
-              <div className="absolute top-4 right-4 h-3 w-3 rounded-full bg-primary shadow-[0_0_10px_theme('colors.primary.DEFAULT')]"></div>
-            )}
-          </button>
-
-          {/* OpenAI Option */}
-          <button
-            onClick={() => handleProviderChange("openai")}
-            className={cn(
-              "relative flex flex-col p-4 rounded-xl border transition-all",
-              settings.llmProvider === "openai"
-                ? "border-purple-500 bg-purple-500/10"
-                : "border-gray-700 bg-gray-900/50 hover:border-gray-600"
-            )}
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <Cloud
-                className={cn(
-                  "h-5 w-5",
-                  settings.llmProvider === "openai" ? "text-purple-500" : "text-gray-400"
-                )}
-              />
-              <span className="font-semibold text-white text-sm">
-                OpenAI (GPT-4)
-              </span>
-            </div>
-            <p className="text-xs text-gray-400 text-left">
-              GPT-4를 사용하여 더 높은 추론 성능 제공.
-              <br />
-              <span className="text-yellow-500 font-medium">
-                인터넷 필요
-              </span>
-            </p>
-            {settings.llmProvider === "openai" && (
-              <div className="absolute top-4 right-4 h-3 w-3 rounded-full bg-purple-500 shadow-[0_0_10px_theme('colors.purple.500')]"></div>
-            )}
-          </button>
-
-          {/* Gemini Option */}
-          <button
-            onClick={() => handleProviderChange("gemini")}
-            className={cn(
-              "relative flex flex-col p-4 rounded-xl border transition-all",
-              settings.llmProvider === "gemini"
-                ? "border-blue-500 bg-blue-500/10"
-                : "border-gray-700 bg-gray-900/50 hover:border-gray-600"
-            )}
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <Cloud
-                className={cn(
-                  "h-5 w-5",
-                  settings.llmProvider === "gemini" ? "text-blue-500" : "text-gray-400"
-                )}
-              />
-              <span className="font-semibold text-white text-sm">
-                Google Gemini
-              </span>
-            </div>
-            <p className="text-xs text-gray-400 text-left">
-              Gemini 1.5 Flash 사용. 빠른 응답 속도.
-              <br />
-              <span className="text-blue-400 font-medium">
-                무료 티어 제공
-              </span>
-            </p>
-            {settings.llmProvider === "gemini" && (
-              <div className="absolute top-4 right-4 h-3 w-3 rounded-full bg-blue-500 shadow-[0_0_10px_theme('colors.blue.500')]"></div>
-            )}
-          </button>
-
-          {/* Mistral Option */}
-          <button
-            onClick={() => handleProviderChange("mistral")}
-            className={cn(
-              "relative flex flex-col p-4 rounded-xl border transition-all",
-              settings.llmProvider === "mistral"
-                ? "border-orange-500 bg-orange-500/10"
-                : "border-gray-700 bg-gray-900/50 hover:border-gray-600"
-            )}
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <Cloud
-                className={cn(
-                  "h-5 w-5",
-                  settings.llmProvider === "mistral" ? "text-orange-500" : "text-gray-400"
-                )}
-              />
-              <span className="font-semibold text-white text-sm">
-                Mistral AI
-              </span>
-            </div>
-            <p className="text-xs text-gray-400 text-left">
-              Mistral Large 사용. 유럽 AI.
-              <br />
-              <span className="text-orange-400 font-medium">
-                고성능 추론
-              </span>
-            </p>
-            {settings.llmProvider === "mistral" && (
-              <div className="absolute top-4 right-4 h-3 w-3 rounded-full bg-orange-500 shadow-[0_0_10px_theme('colors.orange.500')]"></div>
-            )}
-          </button>
-        </div>
-
-        {/* OpenAI API Key Input (Conditional) */}
-        {settings.llmProvider === "openai" && (
-          <div className="animate-in fade-in slide-in-from-top-2">
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              OpenAI API Key
-            </label>
-            <div className="flex items-center gap-2">
-              <Lock className="h-4 w-4 text-gray-500" />
-              <input
-                type="password"
-                placeholder="sk-..."
-                className="flex-1 rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none"
-              />
-            </div>
-            <p className="text-xs text-gray-500 mt-2">
-              API 키는 로컬 저장되며 서버로 전송되지 않습니다. (.env 파일에서 설정)
-            </p>
-          </div>
-        )}
-
-        {/* Gemini API Key Input (Conditional) */}
-        {settings.llmProvider === "gemini" && (
-          <div className="animate-in fade-in slide-in-from-top-2">
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Google Gemini API Key
-            </label>
-            <div className="flex items-center gap-2">
-              <Lock className="h-4 w-4 text-gray-500" />
-              <input
-                type="password"
-                placeholder="AIza..."
-                className="flex-1 rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 focus:border-blue-500 focus:outline-none"
-              />
-            </div>
-            <p className="text-xs text-gray-500 mt-2">
-              API 키는 로컬 저장되며 서버로 전송되지 않습니다. (.env 파일에서 설정)
-            </p>
-          </div>
-        )}
-
-        {/* Mistral API Key Input (Conditional) */}
-        {settings.llmProvider === "mistral" && (
-          <div className="animate-in fade-in slide-in-from-top-2">
-            <label className="block text-sm font-medium text-gray-300 mb-2">
-              Mistral AI API Key
-            </label>
-            <div className="flex items-center gap-2">
-              <Lock className="h-4 w-4 text-gray-500" />
-              <input
-                type="password"
-                placeholder="w7ta..."
-                className="flex-1 rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 focus:border-orange-500 focus:outline-none"
-              />
-            </div>
-            <p className="text-xs text-gray-500 mt-2">
-              API 키는 로컬 저장되며 서버로 전송되지 않습니다. (.env 파일에서 설정)
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* Embedding Provider Section */}
-      <div className="glass-panel p-6 rounded-xl space-y-6">
-        <div className="flex items-center gap-3 border-b border-gray-800 pb-4">
-          <Database className="h-6 w-6 text-green-500" />
-          <h2 className="text-lg font-semibold text-white">
-            임베딩 엔진 설정
-          </h2>
-        </div>
-
-        <div className="grid md:grid-cols-3 gap-4">
-          {/* Local GPU (TEI) Option */}
-          <button
-            onClick={() => handleEmbeddingProviderChange("local-gpu")}
-            className={cn(
-              "relative flex flex-col p-4 rounded-xl border transition-all",
-              settings.embeddingProvider === "local-gpu"
-                ? "border-primary bg-primary/10"
-                : "border-gray-700 bg-gray-900/50 hover:border-gray-600"
-            )}
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <Cpu
-                className={cn(
-                  "h-5 w-5",
-                  settings.embeddingProvider === "local-gpu" ? "text-primary" : "text-gray-400"
-                )}
-              />
-              <span className="font-semibold text-white text-sm">
-                로컬 GPU (TEI)
-              </span>
-            </div>
-            <p className="text-xs text-gray-400 text-left">
-              GPU에서 고속 임베딩 생성. 최고 성능.
-              <br />
-              <span className="text-green-500 font-medium">
-                GPU 필요
-              </span>
-            </p>
-            {settings.embeddingProvider === "local-gpu" && (
-              <div className="absolute top-4 right-4 h-3 w-3 rounded-full bg-primary shadow-[0_0_10px_theme('colors.primary.DEFAULT')]"></div>
-            )}
-          </button>
-
-          {/* Local CPU (sentence-transformers) Option */}
-          <button
-            onClick={() => handleEmbeddingProviderChange("local-cpu")}
-            className={cn(
-              "relative flex flex-col p-4 rounded-xl border transition-all",
-              settings.embeddingProvider === "local-cpu"
-                ? "border-green-500 bg-green-500/10"
-                : "border-gray-700 bg-gray-900/50 hover:border-gray-600"
-            )}
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <Server
-                className={cn(
-                  "h-5 w-5",
-                  settings.embeddingProvider === "local-cpu" ? "text-green-500" : "text-gray-400"
-                )}
-              />
-              <span className="font-semibold text-white text-sm">
-                로컬 CPU (권장)
-              </span>
-            </div>
-            <p className="text-xs text-gray-400 text-left">
-              CPU만으로 실행 가능. GPU 불필요.
-              <br />
-              <span className="text-green-500 font-medium">
-                GPU 없어도 OK
-              </span>
-            </p>
-            {settings.embeddingProvider === "local-cpu" && (
-              <div className="absolute top-4 right-4 h-3 w-3 rounded-full bg-green-500 shadow-[0_0_10px_theme('colors.green.500')]"></div>
-            )}
-          </button>
-
-          {/* OpenAI Embedding Option */}
-          <button
-            onClick={() => handleEmbeddingProviderChange("openai")}
-            className={cn(
-              "relative flex flex-col p-4 rounded-xl border transition-all",
-              settings.embeddingProvider === "openai"
-                ? "border-purple-500 bg-purple-500/10"
-                : "border-gray-700 bg-gray-900/50 hover:border-gray-600"
-            )}
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <Cloud
-                className={cn(
-                  "h-5 w-5",
-                  settings.embeddingProvider === "openai" ? "text-purple-500" : "text-gray-400"
-                )}
-              />
-              <span className="font-semibold text-white text-sm">
-                OpenAI Embedding
-              </span>
-            </div>
-            <p className="text-xs text-gray-400 text-left">
-              text-embedding-3-small 사용. 고품질.
-              <br />
-              <span className="text-yellow-500 font-medium">
-                인터넷 필요
-              </span>
-            </p>
-            {settings.embeddingProvider === "openai" && (
-              <div className="absolute top-4 right-4 h-3 w-3 rounded-full bg-purple-500 shadow-[0_0_10px_theme('colors.purple.500')]"></div>
-            )}
-          </button>
-        </div>
-
-        <p className="text-xs text-gray-500 italic">
-          💡 임베딩은 RAG 검색 시 사용됩니다. CPU 환경이라면 <span className="text-green-500 font-medium">&quot;로컬 CPU&quot;</span>를 선택하세요.
-        </p>
-      </div>
-
-      {/* Anomaly Threshold Section */}
-      <div className="glass-panel p-6 rounded-xl space-y-6">
-        <h2 className="text-lg font-semibold text-white">이상 탐지 민감도</h2>
-        <div className="space-y-4">
-          <div className="flex justify-between text-sm text-gray-400">
-            <span>민감 (낮음)</span>
-            <span>균형</span>
-            <span>심각만 (높음)</span>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max="100"
-            value={Math.round(settings.anomalyThreshold * 100)}
-            onChange={(e) => handleThresholdChange(Number(e.target.value))}
-            className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-primary"
-          />
-          <p className="text-center text-primary font-mono text-xl">
-            {Math.round(settings.anomalyThreshold * 100)}%
-          </p>
-          <p className="text-xs text-center text-gray-500">
-            이상 확률이 {Math.round(settings.anomalyThreshold * 100)}%를 초과할 때만 알림이 발생합니다.
+      <div className="max-w-4xl mx-auto space-y-8">
+        {/* Header */}
+        <div>
+          <h1 className="text-2xl font-bold text-white mb-2">시스템 설정</h1>
+          <p className="text-gray-400">
+            AI 엔진, 이상 탐지 Threshold, 알림 설정을 관리합니다.
           </p>
         </div>
-      </div>
 
-      {/* Slack 알림 설정 */}
-      <div className="glass-panel p-6 rounded-xl space-y-6">
-        <div className="flex items-center gap-3 border-b border-gray-800 pb-4">
-          <Bell className="h-6 w-6 text-orange-500" />
-          <div>
-            <h2 className="text-lg font-semibold text-white">Slack 알림 설정</h2>
-            <p className="text-xs text-gray-500">이상 탐지 시 Slack 채널로 알림을 발송합니다.</p>
+        {/* LLM Provider Section */}
+        <div className="glass-panel p-6 rounded-xl space-y-6">
+          <div className="flex items-center gap-3 border-b border-gray-800 pb-4">
+            <Cpu className="h-6 w-6 text-primary" />
+            <h2 className="text-lg font-semibold text-white">
+              AI 추론 엔진 설정
+            </h2>
           </div>
-        </div>
 
-        {/* 현재 설정 상태 */}
-        {slackSettings && (
-          <div className="p-4 rounded-lg bg-gray-900/50 border border-gray-800">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className={cn(
-                  "h-3 w-3 rounded-full",
-                  slackSettings.webhook_url_set ? "bg-green-500" : "bg-gray-500"
-                )} />
-                <div>
-                  <p className="text-sm font-medium text-white">
-                    {slackSettings.webhook_url_set ? "웹훅 URL 설정됨" : "웹훅 URL 미설정"}
-                  </p>
-                  {slackSettings.webhook_url_masked && (
-                    <p className="text-xs text-gray-500 font-mono">
-                      {slackSettings.webhook_url_masked}
-                    </p>
-                  )}
-                </div>
-              </div>
-              {slackSettings.webhook_url_set && (
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={handleTestSlack}
-                    disabled={isSlackLoading}
-                    className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition disabled:opacity-50"
-                  >
-                    {isSlackLoading ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : (
-                      <Send className="h-3 w-3" />
-                    )}
-                    테스트 발송
-                  </button>
-                  <button
-                    onClick={handleDeleteWebhook}
-                    disabled={isSlackLoading}
-                    className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/20 transition disabled:opacity-50"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* 웹훅 URL 입력 */}
-        <div className="space-y-3">
-          <label className="block text-sm font-medium text-gray-300">
-            Slack Incoming Webhook URL
-          </label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={webhookUrl}
-              onChange={(e) => setWebhookUrl(e.target.value)}
-              placeholder="https://hooks.slack.com/services/T.../B.../..."
-              className="flex-1 px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-sm focus:border-primary focus:outline-none"
-            />
+          <div className="grid md:grid-cols-4 gap-4">
+            {/* Local (vLLM) Option */}
             <button
-              onClick={handleSaveWebhook}
-              disabled={isSlackLoading || !webhookUrl.trim()}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white hover:bg-primary/90 transition disabled:opacity-50"
-            >
-              {isSlackLoading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4" />
+              onClick={() => handleProviderChange("local")}
+              className={cn(
+                "relative flex flex-col p-4 rounded-xl border transition-all",
+                settings.llmProvider === "local"
+                  ? "border-primary bg-primary/10"
+                  : "border-gray-700 bg-gray-900/50 hover:border-gray-600"
               )}
-              저장
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <Server
+                  className={cn(
+                    "h-5 w-5",
+                    settings.llmProvider === "local"
+                      ? "text-primary"
+                      : "text-gray-400"
+                  )}
+                />
+                <span className="font-semibold text-white text-sm">
+                  온프레미스 (vLLM)
+                </span>
+              </div>
+              <p className="text-xs text-gray-400 text-left">
+                GPU에서 로컬 실행. 데이터가 외부로 전송되지 않습니다.
+                <br />
+                <span className="text-green-500 font-medium">보안 최우수</span>
+              </p>
+              {settings.llmProvider === "local" && (
+                <div className="absolute top-4 right-4 h-3 w-3 rounded-full bg-primary shadow-[0_0_10px_theme('colors.primary.DEFAULT')]"></div>
+              )}
+            </button>
+
+            {/* OpenAI Option */}
+            <button
+              onClick={() => handleProviderChange("openai")}
+              className={cn(
+                "relative flex flex-col p-4 rounded-xl border transition-all",
+                settings.llmProvider === "openai"
+                  ? "border-purple-500 bg-purple-500/10"
+                  : "border-gray-700 bg-gray-900/50 hover:border-gray-600"
+              )}
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <Cloud
+                  className={cn(
+                    "h-5 w-5",
+                    settings.llmProvider === "openai"
+                      ? "text-purple-500"
+                      : "text-gray-400"
+                  )}
+                />
+                <span className="font-semibold text-white text-sm">
+                  OpenAI (GPT-4)
+                </span>
+              </div>
+              <p className="text-xs text-gray-400 text-left">
+                GPT-4를 사용하여 더 높은 추론 성능 제공.
+                <br />
+                <span className="text-yellow-500 font-medium">인터넷 필요</span>
+              </p>
+              {settings.llmProvider === "openai" && (
+                <div className="absolute top-4 right-4 h-3 w-3 rounded-full bg-purple-500 shadow-[0_0_10px_theme('colors.purple.500')]"></div>
+              )}
+            </button>
+
+            {/* Gemini Option */}
+            <button
+              onClick={() => handleProviderChange("gemini")}
+              className={cn(
+                "relative flex flex-col p-4 rounded-xl border transition-all",
+                settings.llmProvider === "gemini"
+                  ? "border-blue-500 bg-blue-500/10"
+                  : "border-gray-700 bg-gray-900/50 hover:border-gray-600"
+              )}
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <Cloud
+                  className={cn(
+                    "h-5 w-5",
+                    settings.llmProvider === "gemini"
+                      ? "text-blue-500"
+                      : "text-gray-400"
+                  )}
+                />
+                <span className="font-semibold text-white text-sm">
+                  Google Gemini
+                </span>
+              </div>
+              <p className="text-xs text-gray-400 text-left">
+                Gemini 1.5 Flash 사용. 빠른 응답 속도.
+                <br />
+                <span className="text-blue-400 font-medium">
+                  무료 티어 제공
+                </span>
+              </p>
+              {settings.llmProvider === "gemini" && (
+                <div className="absolute top-4 right-4 h-3 w-3 rounded-full bg-blue-500 shadow-[0_0_10px_theme('colors.blue.500')]"></div>
+              )}
+            </button>
+
+            {/* Mistral Option */}
+            <button
+              onClick={() => handleProviderChange("mistral")}
+              className={cn(
+                "relative flex flex-col p-4 rounded-xl border transition-all",
+                settings.llmProvider === "mistral"
+                  ? "border-orange-500 bg-orange-500/10"
+                  : "border-gray-700 bg-gray-900/50 hover:border-gray-600"
+              )}
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <Cloud
+                  className={cn(
+                    "h-5 w-5",
+                    settings.llmProvider === "mistral"
+                      ? "text-orange-500"
+                      : "text-gray-400"
+                  )}
+                />
+                <span className="font-semibold text-white text-sm">
+                  Mistral AI
+                </span>
+              </div>
+              <p className="text-xs text-gray-400 text-left">
+                Mistral Large 사용. 유럽 AI.
+                <br />
+                <span className="text-orange-400 font-medium">고성능 추론</span>
+              </p>
+              {settings.llmProvider === "mistral" && (
+                <div className="absolute top-4 right-4 h-3 w-3 rounded-full bg-orange-500 shadow-[0_0_10px_theme('colors.orange.500')]"></div>
+              )}
             </button>
           </div>
-          <div className="flex items-center gap-2 text-xs text-gray-500">
-            <ExternalLink className="h-3 w-3" />
-            <a
-              href="https://api.slack.com/apps"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:text-primary transition"
+
+          {/* OpenAI API Key Input (Conditional) */}
+          {settings.llmProvider === "openai" && (
+            <div className="animate-in fade-in slide-in-from-top-2">
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                OpenAI API Key
+              </label>
+              <div className="flex items-center gap-2">
+                <Lock className="h-4 w-4 text-gray-500" />
+                <input
+                  type="password"
+                  placeholder="sk-..."
+                  className="flex-1 rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 focus:border-purple-500 focus:outline-none"
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                API 키는 로컬 저장되며 서버로 전송되지 않습니다. (.env 파일에서
+                설정)
+              </p>
+            </div>
+          )}
+
+          {/* Gemini API Key Input (Conditional) */}
+          {settings.llmProvider === "gemini" && (
+            <div className="animate-in fade-in slide-in-from-top-2">
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Google Gemini API Key
+              </label>
+              <div className="flex items-center gap-2">
+                <Lock className="h-4 w-4 text-gray-500" />
+                <input
+                  type="password"
+                  placeholder="AIza..."
+                  className="flex-1 rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                API 키는 로컬 저장되며 서버로 전송되지 않습니다. (.env 파일에서
+                설정)
+              </p>
+            </div>
+          )}
+
+          {/* Mistral API Key Input (Conditional) */}
+          {settings.llmProvider === "mistral" && (
+            <div className="animate-in fade-in slide-in-from-top-2">
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Mistral AI API Key
+              </label>
+              <div className="flex items-center gap-2">
+                <Lock className="h-4 w-4 text-gray-500" />
+                <input
+                  type="password"
+                  placeholder="w7ta..."
+                  className="flex-1 rounded-md border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-gray-100 focus:border-orange-500 focus:outline-none"
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-2">
+                API 키는 로컬 저장되며 서버로 전송되지 않습니다. (.env 파일에서
+                설정)
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Embedding Provider Section */}
+        <div className="glass-panel p-6 rounded-xl space-y-6">
+          <div className="flex items-center gap-3 border-b border-gray-800 pb-4">
+            <Database className="h-6 w-6 text-green-500" />
+            <h2 className="text-lg font-semibold text-white">
+              임베딩 엔진 설정
+            </h2>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-4">
+            {/* Local GPU (TEI) Option */}
+            <button
+              onClick={() => handleEmbeddingProviderChange("local-gpu")}
+              className={cn(
+                "relative flex flex-col p-4 rounded-xl border transition-all",
+                settings.embeddingProvider === "local-gpu"
+                  ? "border-primary bg-primary/10"
+                  : "border-gray-700 bg-gray-900/50 hover:border-gray-600"
+              )}
             >
-              Slack App에서 Incoming Webhook 생성하기
-            </a>
+              <div className="flex items-center gap-2 mb-2">
+                <Cpu
+                  className={cn(
+                    "h-5 w-5",
+                    settings.embeddingProvider === "local-gpu"
+                      ? "text-primary"
+                      : "text-gray-400"
+                  )}
+                />
+                <span className="font-semibold text-white text-sm">
+                  로컬 GPU (TEI)
+                </span>
+              </div>
+              <p className="text-xs text-gray-400 text-left">
+                GPU에서 고속 임베딩 생성. 최고 성능.
+                <br />
+                <span className="text-green-500 font-medium">GPU 필요</span>
+              </p>
+              {settings.embeddingProvider === "local-gpu" && (
+                <div className="absolute top-4 right-4 h-3 w-3 rounded-full bg-primary shadow-[0_0_10px_theme('colors.primary.DEFAULT')]"></div>
+              )}
+            </button>
+
+            {/* Local CPU (sentence-transformers) Option */}
+            <button
+              onClick={() => handleEmbeddingProviderChange("local-cpu")}
+              className={cn(
+                "relative flex flex-col p-4 rounded-xl border transition-all",
+                settings.embeddingProvider === "local-cpu"
+                  ? "border-green-500 bg-green-500/10"
+                  : "border-gray-700 bg-gray-900/50 hover:border-gray-600"
+              )}
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <Server
+                  className={cn(
+                    "h-5 w-5",
+                    settings.embeddingProvider === "local-cpu"
+                      ? "text-green-500"
+                      : "text-gray-400"
+                  )}
+                />
+                <span className="font-semibold text-white text-sm">
+                  로컬 CPU (권장)
+                </span>
+              </div>
+              <p className="text-xs text-gray-400 text-left">
+                CPU만으로 실행 가능. GPU 불필요.
+                <br />
+                <span className="text-green-500 font-medium">
+                  GPU 없어도 OK
+                </span>
+              </p>
+              {settings.embeddingProvider === "local-cpu" && (
+                <div className="absolute top-4 right-4 h-3 w-3 rounded-full bg-green-500 shadow-[0_0_10px_theme('colors.green.500')]"></div>
+              )}
+            </button>
+
+            {/* OpenAI Embedding Option */}
+            <button
+              onClick={() => handleEmbeddingProviderChange("openai")}
+              className={cn(
+                "relative flex flex-col p-4 rounded-xl border transition-all",
+                settings.embeddingProvider === "openai"
+                  ? "border-purple-500 bg-purple-500/10"
+                  : "border-gray-700 bg-gray-900/50 hover:border-gray-600"
+              )}
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <Cloud
+                  className={cn(
+                    "h-5 w-5",
+                    settings.embeddingProvider === "openai"
+                      ? "text-purple-500"
+                      : "text-gray-400"
+                  )}
+                />
+                <span className="font-semibold text-white text-sm">
+                  OpenAI Embedding
+                </span>
+              </div>
+              <p className="text-xs text-gray-400 text-left">
+                text-embedding-3-small 사용. 고품질.
+                <br />
+                <span className="text-yellow-500 font-medium">인터넷 필요</span>
+              </p>
+              {settings.embeddingProvider === "openai" && (
+                <div className="absolute top-4 right-4 h-3 w-3 rounded-full bg-purple-500 shadow-[0_0_10px_theme('colors.purple.500')]"></div>
+              )}
+            </button>
+          </div>
+
+          <p className="text-xs text-gray-500 italic">
+            💡 임베딩은 RAG 검색 시 사용됩니다. CPU 환경이라면{" "}
+            <span className="text-green-500 font-medium">
+              &quot;로컬 CPU&quot;
+            </span>
+            를 선택하세요.
+          </p>
+        </div>
+
+        {/* Anomaly Threshold Section */}
+        <div className="glass-panel p-6 rounded-xl space-y-6">
+          <h2 className="text-lg font-semibold text-white">이상 탐지 민감도</h2>
+          <div className="space-y-4">
+            <div className="flex justify-between text-sm text-gray-400">
+              <span>민감 (낮음)</span>
+              <span>균형</span>
+              <span>심각만 (높음)</span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={Math.round(settings.anomalyThreshold * 100)}
+              onChange={(e) => handleThresholdChange(Number(e.target.value))}
+              className="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-primary"
+            />
+            <p className="text-center text-primary font-mono text-xl">
+              {Math.round(settings.anomalyThreshold * 100)}%
+            </p>
+            <p className="text-xs text-center text-gray-500">
+              이상 확률이 {Math.round(settings.anomalyThreshold * 100)}%를
+              초과할 때만 알림이 발생합니다.
+            </p>
           </div>
         </div>
 
-        {/* 알림 활성화 토글 */}
-        {slackSettings?.webhook_url_set && (
-          <div className="flex items-center justify-between p-3 rounded-lg bg-gray-900/50 border border-gray-800">
+        {/* Slack 알림 설정 */}
+        <div className="glass-panel p-6 rounded-xl space-y-6">
+          <div className="flex items-center gap-3 border-b border-gray-800 pb-4">
+            <Bell className="h-6 w-6 text-orange-500" />
             <div>
-              <p className="text-sm font-medium text-white">알림 활성화</p>
-              <p className="text-xs text-gray-500">이상 탐지 시 Slack 알림 발송</p>
+              <h2 className="text-lg font-semibold text-white">
+                Slack 알림 설정
+              </h2>
+              <p className="text-xs text-gray-500">
+                이상 탐지 시 Slack 채널로 알림을 발송합니다.
+              </p>
+            </div>
+          </div>
+
+          {/* 현재 설정 상태 */}
+          {slackSettings && (
+            <div className="p-4 rounded-lg bg-gray-900/50 border border-gray-800">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={cn(
+                      "h-3 w-3 rounded-full",
+                      slackSettings.webhook_url_set
+                        ? "bg-green-500"
+                        : "bg-gray-500"
+                    )}
+                  />
+                  <div>
+                    <p className="text-sm font-medium text-white">
+                      {slackSettings.webhook_url_set
+                        ? "웹훅 URL 설정됨"
+                        : "웹훅 URL 미설정"}
+                    </p>
+                    {slackSettings.webhook_url_masked && (
+                      <p className="text-xs text-gray-500 font-mono">
+                        {slackSettings.webhook_url_masked}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                {slackSettings.webhook_url_set && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleTestSlack}
+                      disabled={isSlackLoading}
+                      className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition disabled:opacity-50"
+                    >
+                      {isSlackLoading ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Send className="h-3 w-3" />
+                      )}
+                      테스트 발송
+                    </button>
+                    <button
+                      onClick={handleDeleteWebhook}
+                      disabled={isSlackLoading}
+                      className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/20 transition disabled:opacity-50"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* 웹훅 URL 입력 */}
+          <div className="space-y-3">
+            <label className="block text-sm font-medium text-gray-300">
+              Slack Incoming Webhook URL
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={webhookUrl}
+                onChange={(e) => setWebhookUrl(e.target.value)}
+                placeholder="https://hooks.slack.com/services/T.../B.../..."
+                className="flex-1 px-3 py-2 rounded-lg border border-gray-700 bg-gray-900 text-white text-sm focus:border-primary focus:outline-none"
+              />
+              <button
+                onClick={handleSaveWebhook}
+                disabled={isSlackLoading || !webhookUrl.trim()}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-white hover:bg-primary/90 transition disabled:opacity-50"
+              >
+                {isSlackLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="h-4 w-4" />
+                )}
+                저장
+              </button>
+            </div>
+            <div className="flex items-center gap-2 text-xs text-gray-500">
+              <ExternalLink className="h-3 w-3" />
+              <a
+                href="https://api.slack.com/apps"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-primary transition"
+              >
+                Slack App에서 Incoming Webhook 생성하기
+              </a>
+            </div>
+          </div>
+
+          {/* 알림 활성화 토글 */}
+          {slackSettings?.webhook_url_set && (
+            <div className="flex items-center justify-between p-3 rounded-lg bg-gray-900/50 border border-gray-800">
+              <div>
+                <p className="text-sm font-medium text-white">알림 활성화</p>
+                <p className="text-xs text-gray-500">
+                  이상 탐지 시 Slack 알림 발송
+                </p>
+              </div>
+              <button
+                onClick={handleToggleSlack}
+                disabled={isSlackLoading}
+                className={cn(
+                  "relative w-12 h-6 rounded-full transition-colors",
+                  slackSettings.notifications_enabled
+                    ? "bg-primary"
+                    : "bg-gray-700"
+                )}
+              >
+                <div
+                  className={cn(
+                    "absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform",
+                    slackSettings.notifications_enabled && "translate-x-6"
+                  )}
+                />
+              </button>
+            </div>
+          )}
+
+          {/* 메시지 표시 */}
+          {slackMessage && (
+            <div
+              className={cn(
+                "p-3 rounded-lg text-sm",
+                slackMessage.type === "success"
+                  ? "bg-green-500/20 text-green-400 border border-green-500/50"
+                  : "bg-red-500/20 text-red-400 border border-red-500/50"
+              )}
+            >
+              {slackMessage.text}
+            </div>
+          )}
+        </div>
+
+        {/* AI 채팅 페르소나 설정 */}
+        <div className="glass-panel p-6 rounded-xl space-y-6">
+          <div className="flex items-center gap-3 border-b border-gray-800 pb-4">
+            <Send className="h-6 w-6 text-blue-500" />
+            <div>
+              <h2 className="text-lg font-semibold text-white">
+                AI 채팅 페르소나
+              </h2>
+              <p className="text-xs text-gray-500">
+                채팅창의 첫 인사 메시지를 커스터마이징합니다.
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <label className="block text-sm font-medium text-gray-300">
+              {t("chat.welcomeMessage")}
+            </label>
+            <textarea
+              value={welcomeMessage}
+              onChange={(e) => setWelcomeMessage(e.target.value)}
+              placeholder={t("chat.welcomeMessageDefault")}
+              className="w-full px-4 py-3 rounded-lg border border-gray-700 bg-gray-900 text-white text-sm focus:border-primary focus:outline-none resize-none"
+              rows={5}
+            />
+            <p className="text-xs text-gray-500">
+              💡 이 메시지는 사용자가 채팅을 열 때 AI의 첫 인사로 표시됩니다.
+            </p>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={handleResetWelcomeMessage}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-gray-700 bg-gray-900 hover:bg-gray-800 text-gray-300 transition-colors"
+            >
+              <Trash2 className="h-4 w-4" />
+              기본값 복원
+            </button>
+            <button
+              onClick={handleSaveWelcomeMessage}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-white hover:bg-primary/90 transition-colors font-medium"
+            >
+              <Save className="h-4 w-4" />
+              환영 메시지 저장
+            </button>
+          </div>
+        </div>
+
+        {/* Additional Settings */}
+        <div className="glass-panel p-6 rounded-xl space-y-4">
+          <h2 className="text-lg font-semibold text-white mb-4">추가 설정</h2>
+
+          {/* Log Storage Policy */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Filter className="h-5 w-5 text-cyan-400" />
+              <label className="text-sm font-medium text-gray-300">
+                로그 저장 정책
+              </label>
+            </div>
+            <p className="text-xs text-gray-500 mb-3">
+              데이터베이스에 저장할 로그의 종류를 선택하세요. 필터링을 통해 저장
+              공간을 절약할 수 있습니다.
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              {[
+                { id: "all", label: "모든 로그", desc: "전체" },
+                { id: "info", label: "INFO", desc: "일반" },
+                { id: "warning", label: "WARNING", desc: "경고" },
+                { id: "error", label: "ERROR", desc: "에러" },
+                { id: "anomaly", label: "Anomaly", desc: "이상탐지" },
+              ].map((option) => {
+                const currentPolicies = settings.logStoragePolicy
+                  .split(",")
+                  .map((p) => p.trim());
+                const isActive =
+                  option.id === "all"
+                    ? currentPolicies.includes("all")
+                    : currentPolicies.includes("all") ||
+                      currentPolicies.includes(option.id);
+
+                return (
+                  <button
+                    key={option.id}
+                    disabled={logPolicySaving}
+                    onClick={async () => {
+                      setLogPolicySaving(true);
+                      setLogPolicyMessage(null);
+
+                      let newPolicy = "";
+                      if (option.id === "all") {
+                        newPolicy = isActive ? "error" : "all"; // 'all' 해제 시 기본값인 error로 설정 (예시)
+                      } else {
+                        let parts = currentPolicies.filter((p) => p !== "all");
+                        if (isActive) {
+                          parts = parts.filter((p) => p !== option.id);
+                        } else {
+                          parts.push(option.id);
+                        }
+                        newPolicy =
+                          parts.length === 0 ? "error" : parts.join(",");
+                      }
+
+                      try {
+                        const result = await setLogStoragePolicy(newPolicy);
+                        setSettings({
+                          ...settings,
+                          logStoragePolicy: newPolicy,
+                        });
+                        setLogPolicyMessage({
+                          type: "success",
+                          text: result.message,
+                        });
+                      } catch (error: any) {
+                        setLogPolicyMessage({
+                          type: "error",
+                          text: error.detail || "설정 저장 실패",
+                        });
+                      } finally {
+                        setLogPolicySaving(false);
+                      }
+                    }}
+                    className={cn(
+                      "relative flex flex-col p-3 rounded-lg border transition-all text-left",
+                      logPolicySaving && "opacity-50 cursor-not-allowed",
+                      isActive
+                        ? "border-cyan-500 bg-cyan-500/10"
+                        : "border-gray-700 bg-gray-900/50 hover:border-gray-600"
+                    )}
+                  >
+                    {logPolicySaving ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-cyan-400" />
+                    ) : (
+                      <>
+                        <p className="text-sm font-medium text-white">
+                          {option.label}
+                        </p>
+                        <p className="text-xs text-gray-400">{option.desc}</p>
+                        {isActive && (
+                          <div className="absolute top-2 right-2 h-2 w-2 rounded-full bg-cyan-500 shadow-[0_0_8px_theme('colors.cyan.500')]"></div>
+                        )}
+                      </>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            {logPolicyMessage && (
+              <div
+                className={cn(
+                  "text-xs px-3 py-2 rounded-lg animate-in fade-in",
+                  logPolicyMessage.type === "success"
+                    ? "bg-green-900/50 text-green-300 border border-green-800"
+                    : "bg-red-900/50 text-red-300 border border-red-800"
+                )}
+              >
+                {logPolicyMessage.text}
+              </div>
+            )}
+            <p className="text-xs text-gray-500 mt-2">
+              ℹ️ 현재 선택된 정책:{" "}
+              <span className="text-cyan-400 font-mono">
+                {settings.logStoragePolicy}
+              </span>
+              <br />
+              설정 변경 후 Consumer를 재시작하면 적용됩니다.
+            </p>
+          </div>
+
+          <hr className="border-gray-800 my-4" />
+
+          {/* Theme Toggle */}
+          <div className="flex items-center justify-between p-3 rounded-lg bg-gray-900/50 border border-gray-800">
+            <div className="flex items-center gap-3">
+              {settings.theme === "dark" ? (
+                <Moon className="h-5 w-5 text-blue-400" />
+              ) : (
+                <Sun className="h-5 w-5 text-yellow-400" />
+              )}
+              <div>
+                <p className="text-sm font-medium text-white">다크 모드</p>
+                <p className="text-xs text-gray-500">테마 모드 전환</p>
+              </div>
             </div>
             <button
-              onClick={handleToggleSlack}
-              disabled={isSlackLoading}
+              onClick={() =>
+                handleThemeChange(settings.theme === "dark" ? "light" : "dark")
+              }
               className={cn(
                 "relative w-12 h-6 rounded-full transition-colors",
-                slackSettings.notifications_enabled ? "bg-primary" : "bg-gray-700"
+                settings.theme === "dark" ? "bg-primary" : "bg-gray-700"
               )}
             >
               <div
                 className={cn(
                   "absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform",
-                  slackSettings.notifications_enabled && "translate-x-6"
+                  settings.theme === "dark" && "translate-x-6"
                 )}
               />
             </button>
           </div>
-        )}
 
-        {/* 메시지 표시 */}
-        {slackMessage && (
-          <div className={cn(
-            "p-3 rounded-lg text-sm",
-            slackMessage.type === "success"
-              ? "bg-green-500/20 text-green-400 border border-green-500/50"
-              : "bg-red-500/20 text-red-400 border border-red-500/50"
-          )}>
-            {slackMessage.text}
+          {/* Auto Refresh Toggle */}
+          <div className="flex items-center justify-between p-3 rounded-lg bg-gray-900/50 border border-gray-800">
+            <div className="flex items-center gap-3">
+              <RefreshCw className="h-5 w-5 text-green-400" />
+              <div>
+                <p className="text-sm font-medium text-white">자동 새로고침</p>
+                <p className="text-xs text-gray-500">
+                  대시보드 데이터 자동 갱신 ({settings.refreshInterval}초)
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={toggleAutoRefresh}
+              className={cn(
+                "relative w-12 h-6 rounded-full transition-colors",
+                settings.autoRefresh ? "bg-primary" : "bg-gray-700"
+              )}
+            >
+              <div
+                className={cn(
+                  "absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform",
+                  settings.autoRefresh && "translate-x-6"
+                )}
+              />
+            </button>
           </div>
-        )}
-      </div>
+        </div>
 
-      {/* Additional Settings */}
-      <div className="glass-panel p-6 rounded-xl space-y-4">
-        <h2 className="text-lg font-semibold text-white mb-4">추가 설정</h2>
-
-        {/* Theme Toggle */}
-        <div className="flex items-center justify-between p-3 rounded-lg bg-gray-900/50 border border-gray-800">
-          <div className="flex items-center gap-3">
-            {settings.theme === "dark" ? (
-              <Moon className="h-5 w-5 text-blue-400" />
+        {/* Save Button */}
+        <div className="flex items-center justify-end gap-3">
+          {isSaved && (
+            <div className="flex items-center gap-2 text-green-500 text-sm animate-in fade-in">
+              <Check className="h-4 w-4" />
+              저장 완료!
+            </div>
+          )}
+          <button
+            onClick={handleSave}
+            disabled={isSaving}
+            className={cn(
+              "flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-colors",
+              isSaving
+                ? "bg-gray-700 text-gray-400 cursor-not-allowed"
+                : "bg-primary hover:bg-primary/90 text-white"
+            )}
+          >
+            {isSaving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                저장 중...
+              </>
             ) : (
-              <Sun className="h-5 w-5 text-yellow-400" />
+              <>
+                <Save className="h-4 w-4" />
+                설정 저장
+              </>
             )}
-            <div>
-              <p className="text-sm font-medium text-white">다크 모드</p>
-              <p className="text-xs text-gray-500">테마 모드 전환</p>
-            </div>
-          </div>
-          <button
-            onClick={() => handleThemeChange(settings.theme === "dark" ? "light" : "dark")}
-            className={cn(
-              "relative w-12 h-6 rounded-full transition-colors",
-              settings.theme === "dark" ? "bg-primary" : "bg-gray-700"
-            )}
-          >
-            <div
-              className={cn(
-                "absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform",
-                settings.theme === "dark" && "translate-x-6"
-              )}
-            />
-          </button>
-        </div>
-
-        {/* Auto Refresh Toggle */}
-        <div className="flex items-center justify-between p-3 rounded-lg bg-gray-900/50 border border-gray-800">
-          <div className="flex items-center gap-3">
-            <RefreshCw className="h-5 w-5 text-green-400" />
-            <div>
-              <p className="text-sm font-medium text-white">자동 새로고침</p>
-              <p className="text-xs text-gray-500">
-                대시보드 데이터 자동 갱신 ({settings.refreshInterval}초)
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={toggleAutoRefresh}
-            className={cn(
-              "relative w-12 h-6 rounded-full transition-colors",
-              settings.autoRefresh ? "bg-primary" : "bg-gray-700"
-            )}
-          >
-            <div
-              className={cn(
-                "absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform",
-                settings.autoRefresh && "translate-x-6"
-              )}
-            />
           </button>
         </div>
       </div>
-
-      {/* Save Button */}
-      <div className="flex items-center justify-end gap-3">
-        {isSaved && (
-          <div className="flex items-center gap-2 text-green-500 text-sm animate-in fade-in">
-            <Check className="h-4 w-4" />
-            저장 완료!
-          </div>
-        )}
-        <button
-          onClick={handleSave}
-          className="flex items-center gap-2 bg-primary hover:bg-primary/90 text-white px-6 py-3 rounded-lg font-medium transition-colors"
-        >
-          <Save className="h-4 w-4" />
-          설정 저장
-        </button>
-      </div>
-    </div>
     </DashboardLayout>
   );
 }

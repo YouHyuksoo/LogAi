@@ -191,7 +191,7 @@ export default function LandingPage() {
               href="/dashboard"
               className="hidden sm:flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
             >
-              {t("landing.cta")}
+              {t("landing.ctaButton")}
               <ArrowRight className="h-4 w-4" />
             </Link>
           </div>
@@ -209,7 +209,7 @@ export default function LandingPage() {
             {/* 배지 */}
             <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full ${theme === "dark" ? "bg-blue-500/10 text-blue-400" : "bg-blue-100 text-blue-600"} text-sm font-medium mb-8`}>
               <Zap className="h-4 w-4" />
-              On-Premise AI SRE Solution
+              {t("landing.badge")}
             </div>
 
             {/* 메인 타이틀 */}
@@ -233,7 +233,7 @@ export default function LandingPage() {
                 href="/dashboard"
                 className="group flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-xl font-semibold text-lg transition-all hover:scale-105 shadow-lg shadow-blue-500/25"
               >
-                {t("landing.cta")}
+                {t("landing.ctaButton")}
                 <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1" />
               </Link>
               <a
@@ -252,7 +252,7 @@ export default function LandingPage() {
             {/* 기술 스택 배지 */}
             <div className="mt-12">
               <p className={`text-sm mb-4 ${theme === "dark" ? "text-gray-500" : "text-gray-400"}`}>
-                Powered by
+                {t("landing.poweredBy")}
               </p>
               <div className="flex flex-wrap justify-center gap-3">
                 {techStack.map((tech, idx) => (
@@ -343,9 +343,9 @@ export default function LandingPage() {
               <div className={`inline-flex p-4 rounded-2xl mb-4 ${theme === "dark" ? "bg-green-500/10" : "bg-green-100"}`}>
                 <Shield className="h-8 w-8 text-green-500" />
               </div>
-              <h3 className="text-xl font-bold mb-2">{t("landing.benefits.onpremise.title") || "완전한 온프레미스"}</h3>
+              <h3 className="text-xl font-bold mb-2">{t("landing.benefits.onpremise.title")}</h3>
               <p className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                {t("landing.benefits.onpremise.desc") || "모든 데이터가 사내에서 처리됩니다. 외부 API 호출 없이 완전한 데이터 주권을 보장합니다."}
+                {t("landing.benefits.onpremise.desc")}
               </p>
             </div>
 
@@ -354,9 +354,9 @@ export default function LandingPage() {
               <div className={`inline-flex p-4 rounded-2xl mb-4 ${theme === "dark" ? "bg-purple-500/10" : "bg-purple-100"}`}>
                 <Cpu className="h-8 w-8 text-purple-500" />
               </div>
-              <h3 className="text-xl font-bold mb-2">{t("landing.benefits.gpu.title") || "GPU 가속 추론"}</h3>
+              <h3 className="text-xl font-bold mb-2">{t("landing.benefits.gpu.title")}</h3>
               <p className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                {t("landing.benefits.gpu.desc") || "vLLM을 통한 최적화된 추론으로 실시간 장애 분석이 가능합니다."}
+                {t("landing.benefits.gpu.desc")}
               </p>
             </div>
 
@@ -365,9 +365,9 @@ export default function LandingPage() {
               <div className={`inline-flex p-4 rounded-2xl mb-4 ${theme === "dark" ? "bg-blue-500/10" : "bg-blue-100"}`}>
                 <GitBranch className="h-8 w-8 text-blue-500" />
               </div>
-              <h3 className="text-xl font-bold mb-2">{t("landing.benefits.auto.title") || "지능형 워크플로우"}</h3>
+              <h3 className="text-xl font-bold mb-2">{t("landing.benefits.auto.title")}</h3>
               <p className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                {t("landing.benefits.auto.desc") || "LangGraph 기반 AI 에이전트가 자동으로 장애를 감지하고 분석합니다."}
+                {t("landing.benefits.auto.desc")}
               </p>
             </div>
           </motion.div>
@@ -595,7 +595,7 @@ export default function LandingPage() {
                       </div>
                       <div>
                         <div className="font-bold text-lg text-blue-500">LangGraph Agent</div>
-                        <div className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-500"}`}>RAG + vLLM Inference</div>
+                        <div className={`text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-500"}`}>{t("landing.footer.techStack")} + vLLM Inference</div>
                       </div>
                     </div>
                   </motion.div>
@@ -728,10 +728,10 @@ export default function LandingPage() {
             }`}
           >
             <h2 className="text-3xl md:text-4xl font-bold mb-4">
-              {t("landing.cta.title") || "지금 바로 시작하세요"}
+              {t("landing.cta.title")}
             </h2>
             <p className={`text-lg mb-8 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-              {t("landing.cta.desc") || "Docker Compose 한 줄로 전체 스택을 배포할 수 있습니다"}
+              {t("landing.cta.desc")}
             </p>
 
             {/* 코드 블록 */}
@@ -745,7 +745,7 @@ export default function LandingPage() {
               href="/dashboard"
               className="inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-xl font-semibold text-lg transition-all hover:scale-105 shadow-lg shadow-blue-500/25"
             >
-              {t("landing.cta")}
+              {t("landing.ctaButton")}
               <ArrowRight className="h-5 w-5" />
             </Link>
           </motion.div>
@@ -763,14 +763,14 @@ export default function LandingPage() {
                 <span className="text-xl font-bold">LOG.AI</span>
               </div>
               <p className={`text-sm mb-4 ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
-                {t("landing.footer.desc") || "온프레미스 자율형 로그 분석 시스템. Drain3 템플릿 추출, PyOD 이상 탐지, RAG 기반 AI 분석을 통해 실시간 장애 감지 및 자동 보고를 수행합니다."}
+                {t("landing.footer.desc")}
               </p>
             </div>
 
             {/* 빠른 링크 */}
             <div>
               <h4 className={`font-semibold mb-4 ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                {t("landing.footer.quickLinks") || "바로가기"}
+                {t("landing.footer.quickLinks")}
               </h4>
               <ul className={`space-y-2 text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
                 <li>
@@ -799,7 +799,7 @@ export default function LandingPage() {
             {/* 기술 스택 */}
             <div>
               <h4 className={`font-semibold mb-4 ${theme === "dark" ? "text-white" : "text-gray-900"}`}>
-                {t("landing.footer.techStack") || "기술 스택"}
+                {t("landing.footer.techStack")}
               </h4>
               <ul className={`space-y-2 text-sm ${theme === "dark" ? "text-gray-400" : "text-gray-600"}`}>
                 <li>FastAPI + LangGraph</li>
@@ -813,10 +813,10 @@ export default function LandingPage() {
           {/* 하단 카피라이트 */}
           <div className={`pt-8 border-t ${theme === "dark" ? "border-gray-800" : "border-gray-200"} flex flex-col md:flex-row items-center justify-between gap-4`}>
             <p className={`text-sm ${theme === "dark" ? "text-gray-500" : "text-gray-500"}`}>
-              © 2024 LogAi. Autonomous AI SRE Solution.
+              {t("landing.footer.copyright")}
             </p>
             <div className={`flex items-center gap-4 text-sm ${theme === "dark" ? "text-gray-500" : "text-gray-500"}`}>
-              <span>Made with ❤️ for SRE Teams</span>
+              <span>{t("landing.footer.madeWith")}</span>
             </div>
           </div>
         </div>

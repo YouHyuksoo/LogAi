@@ -41,6 +41,41 @@ logger.addHandler(console_handler)
 # 상위 로거로 전파 방지 (중복 로그 방지)
 logger.propagate = False
 
+def should_save_log(level: str) -> bool:
+    """
+    로그 저장 정책에 따라 저장 여부 결정 (다중 정책 지원)
+    정책은 콤마(,)로 구분된 문자열로 관리됩니다. (예: "error,warn,anomaly")
+
+    Args:
+        level: 로그 레벨 (ERROR, WARNING, INFO, DEBUG 등)
+
+    Returns:
+        True if 저장해야함, False if 저장하지 않음
+    """
+    # 설정에서 정책 로드 및 리스트화
+    raw_policy = settings.LOG_STORAGE_POLICY or "all"
+    policies = [p.strip().lower() for p in raw_policy.split(",")]
+    level_upper = level.upper()
+
+    # 1. 'all' 정책이 포함되어 있으면 모두 저장
+    if "all" in policies:
+        return True
+
+    # 2. 개별 레벨 정책 확인
+    if "error" in policies and level_upper == "ERROR":
+        return True
+    if "warning" in policies and level_upper in ["WARNING", "WARN"]:
+        return True
+    if "info" in policies and level_upper == "INFO":
+        return True
+
+    # 3. 'anomaly' 정책 확인
+    # 이상 탐지를 위해서는 원본 로그가 필요하므로 일단 저장합니다.
+    if "anomaly" in policies or "anomaly-only" in policies:
+        return True
+
+    return False
+
 def process_message(msg_value: str):
     """
     Parse log message from Vector and extract fields.
@@ -50,7 +85,7 @@ def process_message(msg_value: str):
 
     Returns:
         Tuple of (timestamp, level, service, template_id, template, raw_message, params)
-        or None if parsing fails
+        or None if parsing fails or filtering out
     """
     try:
         # UTF-8 BOM 제거 및 공백 정리
@@ -95,6 +130,10 @@ def process_message(msg_value: str):
 
         service = log_data.get("service", "unknown")
         level = log_data.get("level", "INFO")
+
+        # 로그 저장 필터링 체크
+        if not should_save_log(level):
+            return None
 
         # Drain3 parsing
         parsed = parser.parse(raw_message)
