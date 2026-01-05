@@ -51,6 +51,9 @@ interface AnomalyData {
   is_anomaly: boolean;
   details: string;
   status?: "open" | "investigating" | "resolved";
+  raw_message?: string; // 원본 로그 메시지
+  log_level?: string; // 로그 레벨
+  service?: string; // 서비스명
 }
 
 // 프론트엔드에서 사용하는 인시던트 타입
@@ -69,6 +72,9 @@ interface Incident {
   recommendation?: string;
   affectedLogs: number;
   templateId: number;
+  rawMessage: string; // 원본 로그 메시지 (logs 테이블과의 JOIN 결과)
+  logLevel: string; // 로그 레벨 (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+  service: string; // 서비스명
 }
 
 // 통계 요약 데이터 타입
@@ -99,6 +105,9 @@ const demoIncidents: Incident[] = [
     anomalyScore: 0.94,
     templateId: 101,
     affectedLogs: 1247,
+    rawMessage: "[ERROR] 2024-01-04 14:32:15 | NPM-D3-LINE1 | Head 1 Pick Failure | Nozzle 502 | Vacuum: -75kPa | Part: 0402-RES-100ohm | Repeat Count: 15 | Status: PICK_FAILED",
+    logLevel: "ERROR",
+    service: "NPM-D3-LINE1-HEAD1",
     aiAnalysis: "Nozzle 막힘 또는 진공압 이상이 의심됩니다. 최근 24시간 동안 해당 노즐의 흡착률이 점진적으로 하락하는 패턴이 관찰되었습니다. 유사 사례(2023-11-15)에서는 노즐 클리닝으로 해결되었습니다.",
     rootCause: "Nozzle 502번 내부 Solder Paste 잔류물 축적",
     recommendation: "1. 즉시 Nozzle 502번 클리닝 실시\n2. 진공압 센서 점검 (정상 범위: -80kPa 이상)\n3. Feeder 8mm 테이프 텐션 확인\n4. 해당 노즐 마모도 점검 (교체 주기: 50만 회)",
@@ -115,6 +124,9 @@ const demoIncidents: Incident[] = [
     anomalyScore: 0.88,
     templateId: 102,
     affectedLogs: 342,
+    rawMessage: "[WARNING] 2024-01-04 13:45:22 | NPM-W2-LINE2 | Feeder Low Level Alert | Slot: 23 | Part: 0603-MLCC-100nF | Remaining: 48 pcs | ETA Empty: 12min | Status: FEEDER_LOW",
+    logLevel: "WARNING",
+    service: "NPM-W2-LINE2-FEEDER23",
     aiAnalysis: "현재 생산 속도 기준 12분 후 라인 정지 예상. 동일 부품이 Slot 45에 예비 장착되어 있으나, 자동 전환 설정이 비활성화 상태입니다.",
     rootCause: "Feeder 자동 전환 설정 미활성화 및 부품 보충 지연",
     recommendation: "1. 즉시 Slot 23 부품 보충 또는 Slot 45 자동 전환 활성화\n2. 부품 보충 알림 임계값 상향 조정 (50 → 100개)\n3. 생산 계획 대비 부품 재고 사전 확인 프로세스 점검",
@@ -131,6 +143,9 @@ const demoIncidents: Incident[] = [
     anomalyScore: 0.76,
     templateId: 103,
     affectedLogs: 891,
+    rawMessage: "[WARNING] 2024-01-04 12:15:00 | CM602-LINE3 | Vision Offset High | Camera Calib Error: 0.042mm | Trend: +0.027mm | QFP-144 CPK: 1.08 | Status: VISION_CALIB_REQUIRED",
+    logLevel: "WARNING",
+    service: "CM602-LINE3-VISION",
     aiAnalysis: "카메라 렌즈 오염 또는 조명 LED 열화가 의심됩니다. 지난 주 대비 Fine Pitch 부품의 Placement 오차가 180% 증가했습니다.",
     rootCause: "Vision 카메라 렌즈 표면 먼지 축적",
     recommendation: "1. Vision 카메라 렌즈 클리닝 완료 ✓\n2. 조명 LED 밝기 레벨 재조정 (Level 7 → 8)\n3. 캘리브레이션 주기 단축 (월 1회 → 주 1회)",
@@ -147,6 +162,9 @@ const demoIncidents: Incident[] = [
     anomalyScore: 0.71,
     templateId: 104,
     affectedLogs: 523,
+    rawMessage: "[WARNING] 2024-01-04 10:30:45 | NPM-D3-LINE1 | Conveyor Speed Mismatch | Inlet: 1.2m/s | Outlet: 0.9m/s | Slip: 25% | Duration: 3.5min | Status: SPEED_VARIANCE_HIGH",
+    logLevel: "WARNING",
+    service: "NPM-D3-LINE1-CONVEYOR",
     aiAnalysis: "출구측 컨베이어 모터 또는 벨트 텐션 이상이 의심됩니다. 속도 편차가 지속될 경우 PCB 간섭 및 장착 위치 오류 발생 가능성이 있습니다.",
     rootCause: "출구측 Conveyor Belt 마모로 인한 슬립 현상",
     recommendation: "1. Conveyor Belt 텐션 조정\n2. 출구측 모터 드라이버 파라미터 점검\n3. Belt 마모도 확인 및 교체 일정 수립",
@@ -163,6 +181,9 @@ const demoIncidents: Incident[] = [
     anomalyScore: 0.45,
     templateId: 105,
     affectedLogs: 156,
+    rawMessage: "[INFO] 2024-01-04 09:00:00 | NPM-W2-LINE2 | Nozzle Auto Exchange | Head: 2 | Old: 504 | New: 506 | Usage: 480000 cycles | Status: EXCHANGE_COMPLETE",
+    logLevel: "INFO",
+    service: "NPM-W2-LINE2-HEAD2",
     aiAnalysis: "정기 Nozzle 교환 사이클에 따른 자동 교환입니다. 504번 노즐은 사용 횟수 48만 회로 교체 임계값(50만 회)에 근접하여 예방적 교환이 실행되었습니다.",
     rootCause: "정기 예방 정비 (Nozzle 사용 횟수 임계값 도달)",
     recommendation: "1. 504번 노즐 세척 후 예비 보관\n2. 다음 교환 예정: 506번 → 508번 (예상 시점: 48시간 후)",
@@ -179,6 +200,9 @@ const demoIncidents: Incident[] = [
     anomalyScore: 0.92,
     templateId: 106,
     affectedLogs: 89,
+    rawMessage: "[CRITICAL] 2024-01-04 08:15:30 | CM602-LINE3 | Safety Sensor Alert | Area: Work Zone | Object Detected: YES | Size: ~2cm | E-Stop: ACTIVATED | Status: EMERGENCY_STOP",
+    logLevel: "CRITICAL",
+    service: "CM602-LINE3-SAFETY",
     aiAnalysis: "Area Sensor가 작업 영역 내 비정상 물체를 감지했습니다. 작업자 안전을 위해 즉시 정지가 실행되었습니다. 이물질 제거 후 정상 가동이 재개되었습니다.",
     rootCause: "탈락된 부품 테이프 조각이 작업 영역으로 진입",
     recommendation: "1. 이물질 제거 완료 ✓\n2. Feeder 테이프 커터 정렬 상태 점검\n3. 작업 영역 에어 블로우 청소 실시",
@@ -195,6 +219,9 @@ const demoIncidents: Incident[] = [
     anomalyScore: 0.69,
     templateId: 107,
     affectedLogs: 678,
+    rawMessage: "[WARNING] 2024-01-04 07:45:00 | NPM-D3-LINE1 | Placement Accuracy Drop | Head: 3 | Part Size: 0201 | Accuracy: 94.2% | Trend: -4.3% | CPK: 1.08 | Status: ACCURACY_LOW",
+    logLevel: "WARNING",
+    service: "NPM-D3-LINE1-HEAD3",
     aiAnalysis: "0201 초소형 부품의 장착 정밀도가 저하되고 있습니다. Head 3의 Z축 반복 정밀도 문제 또는 부품 공급 위치 편차가 원인으로 추정됩니다.",
     rootCause: "Head 3 Z축 Ball Screw 백래시 증가",
     recommendation: "1. Head 3 Z축 원점 재설정\n2. Ball Screw 백래시 측정 및 보정\n3. 0201 부품 Pickup 위치 오프셋 미세 조정",
@@ -211,6 +238,9 @@ const demoIncidents: Incident[] = [
     anomalyScore: 0.32,
     templateId: 108,
     affectedLogs: 245,
+    rawMessage: "[INFO] 2024-01-04 06:30:15 | NPM-W2-LINE2 | Job Switch Complete | Old Job: PCB-A2024-001 | New Job: PCB-A2024-002 | Duration: 8min32sec | First PCB: OK | Status: JOB_READY",
+    logLevel: "INFO",
+    service: "NPM-W2-LINE2-SYSTEM",
     aiAnalysis: "정상적인 Job 변경 프로세스입니다. 총 소요 시간 8분 32초로 표준 시간(10분) 이내에 완료되었습니다. 첫 PCB 시험 장착 결과 양호.",
     rootCause: "계획된 생산 스케줄에 따른 Job 전환",
     recommendation: "1. 첫 5장 PCB 육안 검사 완료\n2. SPI 검사 결과 확인 후 정규 생산 진행",
@@ -221,6 +251,7 @@ const demoIncidents: Incident[] = [
  * AnomalyData를 Incident로 변환하는 함수
  * - anomaly_score 기준으로 severity 결정
  * - template_id로 소스 식별
+ * - raw_message를 원본 로그 메시지로 포함
  */
 function convertToIncident(anomaly: AnomalyData, index: number): Incident {
   // 심각도 결정 (점수 기반)
@@ -276,10 +307,13 @@ function convertToIncident(anomaly: AnomalyData, index: number): Incident {
     status,
     title,
     description: parsedDetails.message || anomaly.details,
-    source: parsedDetails.service || `TEMPLATE-${anomaly.template_id}`,
+    source: anomaly.service || parsedDetails.service || `TEMPLATE-${anomaly.template_id}`,
     anomalyScore: anomaly.anomaly_score,
     templateId: anomaly.template_id,
     affectedLogs: Math.floor(anomaly.anomaly_score * 1000), // 점수 기반 추정치
+    rawMessage: anomaly.raw_message || "", // 원본 로그 메시지
+    logLevel: anomaly.log_level || "", // 로그 레벨
+    service: anomaly.service || "", // 서비스명
     aiAnalysis: severity === "critical"
       ? `이상 점수 ${(anomaly.anomaly_score * 100).toFixed(1)}%로 높은 이상치가 감지되었습니다. Template ID ${anomaly.template_id}에서 비정상적인 패턴이 발견되었으며, 즉각적인 점검이 필요합니다.`
       : severity === "warning"
@@ -1313,6 +1347,50 @@ export default function AnalysisPage() {
                       상태 업데이트 중...
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* 원본 로그 메시지 */}
+              {selectedIncident.rawMessage && (
+                <div className={cn(
+                  "p-4 rounded-xl border",
+                  theme === "dark"
+                    ? "bg-gray-800/50 border-gray-700"
+                    : "bg-gray-50 border-gray-200"
+                )}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <FileText className="w-4 h-4 text-gray-500" />
+                    <h3 className={cn(
+                      "text-xs font-semibold",
+                      theme === "dark" ? "text-gray-300" : "text-gray-700"
+                    )}>
+                      원본 로그 메시지
+                    </h3>
+                    {selectedIncident.logLevel && (
+                      <span className={cn(
+                        "px-2 py-0.5 rounded text-xs font-mono",
+                        selectedIncident.logLevel === "CRITICAL" || selectedIncident.logLevel === "ERROR"
+                          ? theme === "dark"
+                            ? "bg-red-500/20 text-red-400"
+                            : "bg-red-100 text-red-700"
+                          : selectedIncident.logLevel === "WARNING"
+                          ? theme === "dark"
+                            ? "bg-yellow-500/20 text-yellow-400"
+                            : "bg-yellow-100 text-yellow-700"
+                          : theme === "dark"
+                          ? "bg-blue-500/20 text-blue-400"
+                          : "bg-blue-100 text-blue-700"
+                      )}>
+                        {selectedIncident.logLevel}
+                      </span>
+                    )}
+                  </div>
+                  <p className={cn(
+                    "text-sm font-mono whitespace-pre-wrap break-words",
+                    theme === "dark" ? "text-gray-300" : "text-gray-700"
+                  )}>
+                    {selectedIncident.rawMessage}
+                  </p>
                 </div>
               )}
 

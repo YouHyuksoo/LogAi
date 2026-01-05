@@ -997,7 +997,7 @@ export default function SettingsPage() {
                         const result = await setLogStoragePolicy(newPolicy);
                         setSettings({
                           ...settings,
-                          logStoragePolicy: newPolicy,
+                          logStoragePolicy: newPolicy as LogStoragePolicy,
                         });
                         setLogPolicyMessage({
                           type: "success",

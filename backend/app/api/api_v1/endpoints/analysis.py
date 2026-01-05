@@ -38,6 +38,7 @@ def get_anomalies(
 ) -> List[Dict[str, Any]]:
     """
     ClickHouse anomalies 테이블에서 이상 탐지 결과 조회
+    로그 테이블과 JOIN하여 원본 로그 메시지도 함께 반환
 
     Args:
         limit: 조회할 최대 개수 (기본 50, 최대 500)
@@ -45,20 +46,25 @@ def get_anomalies(
         min_score: 최소 이상 점수 필터 (기본 0.0)
 
     Returns:
-        이상 탐지 목록 (timestamp, template_id, anomaly_score, is_anomaly, details, status)
+        이상 탐지 목록 (timestamp, template_id, anomaly_score, is_anomaly, details, status, raw_message)
     """
+    # logs 테이블과 LEFT JOIN하여 원본 로그 메시지 포함
     query = f"""
         SELECT
-            timestamp,
-            template_id,
-            anomaly_score,
-            is_anomaly,
-            details,
-            status
-        FROM anomalies
-        WHERE timestamp > now() - INTERVAL {int(hours)} HOUR
-          AND anomaly_score >= {float(min_score)}
-        ORDER BY timestamp DESC
+            a.timestamp,
+            a.template_id,
+            a.anomaly_score,
+            a.is_anomaly,
+            a.details,
+            a.status,
+            l.raw_message,
+            l.log_level,
+            l.service
+        FROM anomalies a
+        LEFT JOIN logs l ON a.timestamp = l.timestamp AND a.template_id = l.template_id
+        WHERE a.timestamp > now() - INTERVAL {int(hours)} HOUR
+          AND a.anomaly_score >= {float(min_score)}
+        ORDER BY a.timestamp DESC
         LIMIT {int(limit)}
     """
 
@@ -72,7 +78,10 @@ def get_anomalies(
             "anomaly_score": row[2],
             "is_anomaly": bool(row[3]),
             "details": row[4],
-            "status": row[5] if len(row) > 5 and row[5] else "open"
+            "status": row[5] if len(row) > 5 and row[5] else "open",
+            "raw_message": row[6] if len(row) > 6 and row[6] else "",  # 원본 로그 메시지
+            "log_level": row[7] if len(row) > 7 and row[7] else "",  # 로그 레벨
+            "service": row[8] if len(row) > 8 and row[8] else ""  # 서비스명
         })
 
     return anomalies

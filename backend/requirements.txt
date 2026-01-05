@@ -1,7 +1,7 @@
 # FastAPI & Web Server
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
-pydantic==2.5.3
+pydantic==2.7.4
 pydantic-settings==2.1.0
 
 # Message Queue & Database
@@ -19,13 +19,13 @@ pandas==2.1.4
 
 # AI & LLM
 langchain==0.2.16  # Pydantic v2 지원 버전
-langchain-core==0.2.38
+langchain-core==0.2.40
 langchain-openai==0.1.25
 langchain-google-genai==1.0.10
 langgraph==0.2.28  # 최신 안정 버전
 langsmith==0.1.129  # 명시적 버전 고정
 openai==1.51.2
-google-generativeai==0.8.3
+google-generativeai==0.7.2
 
 # Embeddings
 sentence-transformers==2.5.1
