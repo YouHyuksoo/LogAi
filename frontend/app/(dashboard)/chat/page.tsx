@@ -35,6 +35,9 @@ import {
   X,
   BookOpen,
   Lightbulb,
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/theme";
@@ -43,6 +46,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import {
   sendChatMessage,
   getAllSettings,
+  fetchSuggestions,
 } from "@/lib/api-client";
 import type { ChatMessage } from "@/lib/types";
 import ReactMarkdown from "react-markdown";
@@ -87,14 +91,14 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 
 /**
  * @description
- * 채팅 초반에 사용자에게 제안할 문구들입니다.
- * 사용자가 클릭하면 자동으로 입력창에 채워집니다.
+ * 기본 제안 문구 (API 로딩 실패 시 fallback)
  */
-const CHAT_SUGGESTIONS = [
-  "최근 Placement Error가 급증한 원인은?",
-  "Memory 사용량이 갑자기 증가한 이유를 분석해줘",
-  "Error rate가 높은 이유를 찾아줄래?",
-  "어제 장애가 발생했던 패턴을 알려줘",
+const DEFAULT_SUGGESTIONS = [
+  "최근 발생한 에러 로그를 보여줘",
+  "서비스별 로그 건수를 분석해줘",
+  "오늘 가장 많이 발생한 경고는?",
+  "시간대별 로그 추이를 보여줘",
+  "이상 패턴이 감지된 로그가 있어?",
 ];
 
 export default function ChatPage() {
@@ -154,8 +158,10 @@ export default function ChatPage() {
     isOpen: false,
     sources: [],
   });
-  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>(DEFAULT_SUGGESTIONS);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const suggestionsScrollRef = useRef<HTMLDivElement>(null);
 
   // ==================== Effects ====================
 
@@ -185,6 +191,33 @@ export default function ChatPage() {
       loadLlmProvider();
     }
   }, [isClient]);
+
+  /**
+   * 동적 제안 질문 로드 (최근 로그 기반)
+   * - 페이지 로드 시 실행
+   * - 새로고침 버튼 클릭 시에도 호출 가능
+   * - LLM을 통해 최근 로그에서 추출한 키워드 기반 제안 생성
+   */
+  const loadDynamicSuggestions = useCallback(async () => {
+    setSuggestionsLoading(true);
+    try {
+      const result = await fetchSuggestions();
+      if (result.suggestions && result.suggestions.length > 0) {
+        setSuggestions(result.suggestions);
+      }
+    } catch (error) {
+      console.error("Failed to load dynamic suggestions:", error);
+      // 실패 시 기본 제안 유지
+    } finally {
+      setSuggestionsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isClient) {
+      loadDynamicSuggestions();
+    }
+  }, [isClient, loadDynamicSuggestions]);
 
   /**
    * 새 메시지 추가 시 자동 스크롤
@@ -865,55 +898,91 @@ export default function ChatPage() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                onFocus={() => setShowSuggestions(true)}
-                onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
                 placeholder="예: Placement Error가 급증한 원인은 뭐야?"
                 className="w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-2 text-sm text-gray-100 placeholder:text-gray-600 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
                 disabled={isLoading}
               />
 
-              {/* 제안 드롭다운 (입력창 위에 표시, 초반에만 표시) */}
-              {messages.length === 1 && showSuggestions && (
-                <div className="absolute bottom-full left-0 right-0 mb-2 bg-gray-900 border border-gray-700 rounded-lg shadow-lg overflow-hidden">
-                  {/* 헤더 */}
-                  <div className="flex items-center justify-between gap-2 px-3 py-2 bg-gray-800 border-b border-gray-700">
-                    <div className="flex items-center gap-2">
-                      <Lightbulb className="w-4 h-4 text-yellow-400 flex-shrink-0" />
-                      <p className="text-xs text-gray-400">제안 질문</p>
+              {/* 제안 질문 바 (항상 표시) */}
+              <div className="absolute bottom-full left-0 right-0 mb-2 bg-gray-900 border border-gray-700 rounded-lg shadow-lg overflow-hidden">
+                {/* 헤더 */}
+                <div className="flex items-center justify-between gap-2 px-3 py-2 bg-gray-800 border-b border-gray-700">
+                  <div className="flex items-center gap-2">
+                    <Lightbulb className="w-4 h-4 text-yellow-400 flex-shrink-0" />
+                    <p className="text-xs text-gray-400">제안 질문 (최근 로그 기반)</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => loadDynamicSuggestions()}
+                    disabled={suggestionsLoading}
+                    className="flex items-center gap-1.5 px-2 py-1 text-xs text-gray-400 hover:text-primary hover:bg-gray-700 rounded transition-colors disabled:opacity-50"
+                    title="새로운 제안 생성"
+                  >
+                    <RefreshCw className={cn("w-3.5 h-3.5", suggestionsLoading && "animate-spin")} />
+                    새로고침
+                  </button>
+                </div>
+
+                {/* 제안 항목 - 좌우 버튼으로 스크롤 */}
+                <div className="relative flex items-center">
+                  {/* 왼쪽 버튼 */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (suggestionsScrollRef.current) {
+                        suggestionsScrollRef.current.scrollBy({ left: -200, behavior: 'smooth' });
+                      }
+                    }}
+                    className="flex-shrink-0 p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+
+                  {/* 제안 목록 */}
+                  <div
+                    ref={suggestionsScrollRef}
+                    className="flex-1 overflow-x-auto scrollbar-hide"
+                    style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                  >
+                    <div className="flex gap-2 py-2 px-1">
+                      {suggestionsLoading ? (
+                        <div className="flex items-center gap-2 px-4 py-2 text-gray-400 text-sm">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          최근 로그 분석 중...
+                        </div>
+                      ) : (
+                        suggestions.map((suggestion, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => setInput(suggestion)}
+                            className={cn(
+                              "flex-shrink-0 px-4 py-2 rounded-lg text-sm text-left transition-all border whitespace-nowrap",
+                              "bg-gray-800/50 border-gray-700 hover:border-primary hover:bg-gray-700",
+                              "text-gray-300 hover:text-white"
+                            )}
+                          >
+                            {suggestion}
+                          </button>
+                        ))
+                      )}
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => setShowSuggestions(false)}
-                      className="text-gray-400 hover:text-gray-200 transition-colors"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
                   </div>
 
-                  {/* 제안 항목 - 가로 스크롤 */}
-                  <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-gray-900">
-                    <div className="flex gap-2 p-3 min-w-max">
-                      {CHAT_SUGGESTIONS.map((suggestion, idx) => (
-                        <button
-                          key={idx}
-                          type="button"
-                          onClick={() => {
-                            setInput(suggestion);
-                            setShowSuggestions(false);
-                          }}
-                          className={cn(
-                            "flex-shrink-0 px-4 py-2 rounded-lg text-sm text-left transition-all border whitespace-nowrap",
-                            "bg-gray-800/50 border-gray-700 hover:border-primary hover:bg-gray-700",
-                            "text-gray-300 hover:text-white"
-                          )}
-                        >
-                          {suggestion}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                  {/* 오른쪽 버튼 */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (suggestionsScrollRef.current) {
+                        suggestionsScrollRef.current.scrollBy({ left: 200, behavior: 'smooth' });
+                      }
+                    }}
+                    className="flex-shrink-0 p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
                 </div>
-              )}
+              </div>
             </div>
 
             <button

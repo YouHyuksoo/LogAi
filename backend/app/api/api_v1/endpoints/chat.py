@@ -915,3 +915,192 @@ def get_qdrant_stats():
             "vector_size": 0,
             "status": f"error: {str(e)}"
         }
+
+
+# ==================== 동적 제안 질문 API ====================
+
+class SuggestionsResponse(BaseModel):
+    """제안 질문 응답"""
+    suggestions: List[str] = Field(..., description="제안 질문 리스트 (5개)")
+    based_on: Dict[str, Any] = Field(default={}, description="제안 생성에 사용된 데이터 요약")
+
+
+@router.get("/suggestions", response_model=SuggestionsResponse)
+async def get_dynamic_suggestions():
+    """
+    최근 로그 기반 동적 제안 질문 생성
+
+    최근 로그를 분석하여 사용자에게 유용한 질문을 5개 제안합니다.
+    - 최근 에러/경고 패턴 분석
+    - 자주 발생하는 서비스 및 이슈 키워드 추출
+    - LLM을 통해 자연스러운 질문 문구 생성
+
+    Returns:
+        suggestions: 제안 질문 5개
+        based_on: 분석에 사용된 데이터 요약
+    """
+    from app.services.clickhouse_client import ch_client
+
+    try:
+        # ==================== 1. 최근 로그 통계 수집 ====================
+        stats_data = {}
+
+        # 1-1. 에러 레벨별 카운트 (최근 1시간)
+        level_query = """
+            SELECT log_level, COUNT(*) as cnt
+            FROM logs
+            WHERE timestamp >= now() - INTERVAL 1 HOUR
+            GROUP BY log_level
+            ORDER BY cnt DESC
+        """
+        level_result = ch_client.execute(level_query)
+        stats_data["log_levels"] = {row[0]: row[1] for row in level_result}
+
+        # 1-2. 서비스별 에러 카운트 (ERROR/WARN만)
+        service_query = """
+            SELECT service, COUNT(*) as cnt
+            FROM logs
+            WHERE timestamp >= now() - INTERVAL 1 HOUR
+              AND log_level IN ('ERROR', 'WARN')
+            GROUP BY service
+            ORDER BY cnt DESC
+            LIMIT 5
+        """
+        service_result = ch_client.execute(service_query)
+        stats_data["error_services"] = [(row[0], row[1]) for row in service_result]
+
+        # 1-3. 자주 발생하는 에러 메시지 (raw_message에서 키워드 추출)
+        message_query = """
+            SELECT raw_message, COUNT(*) as cnt
+            FROM logs
+            WHERE timestamp >= now() - INTERVAL 1 HOUR
+              AND log_level = 'ERROR'
+            GROUP BY raw_message
+            ORDER BY cnt DESC
+            LIMIT 10
+        """
+        message_result = ch_client.execute(message_query)
+        stats_data["top_errors"] = [(row[0][:100], row[1]) for row in message_result]
+
+        # 1-4. 최근 로그 샘플 (다양성을 위해)
+        sample_query = """
+            SELECT DISTINCT raw_message
+            FROM logs
+            WHERE timestamp >= now() - INTERVAL 1 HOUR
+            ORDER BY timestamp DESC
+            LIMIT 20
+        """
+        sample_result = ch_client.execute(sample_query)
+        stats_data["recent_samples"] = [row[0][:150] for row in sample_result]
+
+        # ==================== 2. LLM으로 제안 질문 생성 ====================
+        # 데이터가 없으면 기본 제안 반환
+        if not stats_data.get("log_levels") and not stats_data.get("error_services"):
+            return SuggestionsResponse(
+                suggestions=[
+                    "최근 발생한 에러 로그를 보여줘",
+                    "서비스별 로그 건수를 분석해줘",
+                    "오늘 가장 많이 발생한 경고는?",
+                    "시간대별 로그 추이를 보여줘",
+                    "이상 패턴이 감지된 로그가 있어?"
+                ],
+                based_on={"status": "no_recent_logs", "message": "최근 1시간 로그 없음"}
+            )
+
+        # LLM 프롬프트 구성
+        context = f"""당신은 SMD 마운터 설비 로그 분석 시스템의 AI입니다.
+아래는 최근 1시간 동안의 로그 통계입니다:
+
+**로그 레벨 분포:**
+{json.dumps(stats_data.get('log_levels', {}), ensure_ascii=False)}
+
+**에러가 많은 서비스 (상위 5개):**
+{stats_data.get('error_services', [])}
+
+**자주 발생하는 에러 메시지 (상위 10개):**
+{stats_data.get('top_errors', [])}
+
+**최근 로그 샘플:**
+{stats_data.get('recent_samples', [])[:5]}
+
+위 데이터를 기반으로, 사용자가 물어볼 만한 **분석 질문 5개**를 생성해주세요.
+
+규칙:
+1. 실제 데이터에 기반한 구체적인 질문 (예: "NPM/AM-04 서비스에서 Nozzle 에러가 급증한 원인은?")
+2. 다양한 관점: 에러 원인, 트렌드, 비교, 해결책 등
+3. 한국어로 자연스럽게 작성
+4. 각 질문은 한 줄로, 물음표로 끝나야 함
+5. 번호 없이 질문만 출력 (한 줄에 하나씩)
+
+출력 예시:
+Nozzle 에러가 최근 급증한 이유는?
+NPM/AM-04 서비스의 ERROR 패턴을 분석해줘
+오늘 발생한 Feeder 관련 경고는 몇 건이야?
+시간대별 에러 발생 추이를 보여줘
+메모리 사용량 관련 이슈가 있어?"""
+
+        # LLM 호출
+        client = llm_factory.get_client()
+        model_name = llm_factory.get_model_name()
+
+        response = await client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": "당신은 로그 분석 질문 생성 전문가입니다. 주어진 데이터를 기반으로 유용한 분석 질문을 생성합니다."},
+                {"role": "user", "content": context}
+            ],
+            temperature=0.7,  # 다양성을 위해 약간 높게
+            max_tokens=300
+        )
+
+        llm_response = response.choices[0].message.content.strip()
+
+        # ==================== 3. 응답 파싱 ====================
+        # 줄 단위로 분리하여 질문 추출
+        lines = [line.strip() for line in llm_response.split('\n') if line.strip()]
+
+        # 질문만 필터링 (물음표로 끝나거나 "~줘"로 끝나는 것)
+        suggestions = []
+        for line in lines:
+            # 번호 제거 (1. 2. 등)
+            cleaned = line.lstrip('0123456789.-) ').strip()
+            if cleaned and (cleaned.endswith('?') or cleaned.endswith('줘') or cleaned.endswith('야') or cleaned.endswith('요')):
+                suggestions.append(cleaned)
+
+        # 5개로 제한
+        suggestions = suggestions[:5]
+
+        # 부족하면 기본 질문으로 채움
+        default_questions = [
+            "최근 에러 로그 패턴을 분석해줘",
+            "서비스별 이상 징후를 확인해줘",
+            "오늘 가장 많이 발생한 경고는?",
+            "시간대별 로그 추이를 보여줘",
+            "설비 상태 요약을 보여줘"
+        ]
+        while len(suggestions) < 5:
+            suggestions.append(default_questions[len(suggestions)])
+
+        return SuggestionsResponse(
+            suggestions=suggestions,
+            based_on={
+                "log_levels": stats_data.get("log_levels", {}),
+                "error_services_count": len(stats_data.get("error_services", [])),
+                "top_errors_count": len(stats_data.get("top_errors", [])),
+                "analysis_period": "최근 1시간"
+            }
+        )
+
+    except Exception as e:
+        # 오류 시 기본 제안 반환
+        print(f"⚠️ 동적 제안 생성 실패: {e}")
+        return SuggestionsResponse(
+            suggestions=[
+                "최근 발생한 에러 로그를 보여줘",
+                "서비스별 로그 건수를 분석해줘",
+                "오늘 가장 많이 발생한 경고는?",
+                "시간대별 로그 추이를 보여줘",
+                "이상 패턴이 감지된 로그가 있어?"
+            ],
+            based_on={"status": "error", "message": str(e)}
+        )
