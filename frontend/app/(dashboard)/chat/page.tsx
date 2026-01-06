@@ -154,6 +154,7 @@ export default function ChatPage() {
     isOpen: false,
     sources: [],
   });
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // ==================== Effects ====================
@@ -849,31 +850,6 @@ export default function ChatPage() {
             </div>
           )}
 
-          {/* 제안 문구 (초반에만 표시) */}
-          {messages.length === 1 && (
-            <div className="mb-4 space-y-2">
-              <div className="flex items-center gap-2 px-1 mb-2">
-                <Lightbulb className="w-4 h-4 text-yellow-400" />
-                <p className="text-xs text-gray-400">제안 질문을 선택하거나 직접 입력하세요</p>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {CHAT_SUGGESTIONS.map((suggestion, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => setInput(suggestion)}
-                    className={cn(
-                      "p-3 rounded-lg text-sm text-left transition-all border",
-                      "bg-gray-800/50 border-gray-700 hover:border-primary hover:bg-gray-700",
-                      "text-gray-300 hover:text-white"
-                    )}
-                  >
-                    <p className="line-clamp-2">{suggestion}</p>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -881,16 +857,65 @@ export default function ChatPage() {
             }}
             className="flex gap-2"
           >
-            <input
-              autoFocus
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="예: Placement Error가 급증한 원인은 뭐야?"
-              className="flex-1 rounded-lg border border-gray-700 bg-gray-950 px-4 py-2 text-sm text-gray-100 placeholder:text-gray-600 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-              disabled={isLoading}
-            />
+            <div className="flex-1 relative">
+              {/* 입력창 */}
+              <input
+                autoFocus
+                type="text"
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onFocus={() => setShowSuggestions(true)}
+                onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                placeholder="예: Placement Error가 급증한 원인은 뭐야?"
+                className="w-full rounded-lg border border-gray-700 bg-gray-950 px-4 py-2 text-sm text-gray-100 placeholder:text-gray-600 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                disabled={isLoading}
+              />
+
+              {/* 제안 드롭다운 (입력창 위에 표시, 초반에만 표시) */}
+              {messages.length === 1 && showSuggestions && (
+                <div className="absolute bottom-full left-0 right-0 mb-2 bg-gray-900 border border-gray-700 rounded-lg shadow-lg overflow-hidden">
+                  {/* 헤더 */}
+                  <div className="flex items-center justify-between gap-2 px-3 py-2 bg-gray-800 border-b border-gray-700">
+                    <div className="flex items-center gap-2">
+                      <Lightbulb className="w-4 h-4 text-yellow-400 flex-shrink-0" />
+                      <p className="text-xs text-gray-400">제안 질문</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowSuggestions(false)}
+                      className="text-gray-400 hover:text-gray-200 transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* 제안 항목 - 가로 스크롤 */}
+                  <div className="overflow-x-auto scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-gray-900">
+                    <div className="flex gap-2 p-3 min-w-max">
+                      {CHAT_SUGGESTIONS.map((suggestion, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            setInput(suggestion);
+                            setShowSuggestions(false);
+                          }}
+                          className={cn(
+                            "flex-shrink-0 px-4 py-2 rounded-lg text-sm text-left transition-all border whitespace-nowrap",
+                            "bg-gray-800/50 border-gray-700 hover:border-primary hover:bg-gray-700",
+                            "text-gray-300 hover:text-white"
+                          )}
+                        >
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <button
               type="submit"
               disabled={isLoading || !input.trim()}

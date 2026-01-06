@@ -39,6 +39,54 @@ import json
 
 router = APIRouter()
 
+
+# ==================== Helper Functions ====================
+
+def extract_sql_query(llm_response: str) -> tuple[str, bool]:
+    """
+    LLM 응답에서 SQL 쿼리를 추출하는 헬퍼 함수
+
+    Args:
+        llm_response: LLM의 원본 응답 텍스트
+
+    Returns:
+        tuple: (추출된 SQL 또는 "NO_QUERY", 유효한 SELECT 쿼리인지 여부)
+
+    동작:
+    1. 코드블록(```sql ... ```) 제거
+    2. 공백 정리
+    3. NO_QUERY 체크
+    4. SELECT로 시작하는지 검증
+    """
+    if not llm_response:
+        return "NO_QUERY", False
+
+    # 코드블록 제거 (```sql, ```, ```SQL 등)
+    cleaned = llm_response.strip()
+
+    # ```sql ... ``` 형태 처리
+    if "```" in cleaned:
+        # 코드블록 내용만 추출
+        import re
+        # ```sql 또는 ``` 사이의 내용 추출
+        code_block_pattern = r'```(?:sql|SQL)?\s*([\s\S]*?)```'
+        matches = re.findall(code_block_pattern, cleaned)
+        if matches:
+            cleaned = matches[0].strip()
+        else:
+            # 매칭 실패 시 단순 제거
+            cleaned = cleaned.replace("```sql", "").replace("```SQL", "").replace("```", "").strip()
+
+    # NO_QUERY 체크 (대소문자 무관)
+    if cleaned.upper() == "NO_QUERY" or "NO_QUERY" in cleaned.upper():
+        return "NO_QUERY", False
+
+    # SELECT로 시작하는지 검증
+    is_valid_select = cleaned.upper().startswith("SELECT")
+
+    return cleaned, is_valid_select
+
+
 # ==================== Request/Response Models ====================
 
 class ChatMessage(BaseModel):
@@ -57,6 +105,8 @@ class ChatResponse(BaseModel):
     response: str = Field(..., description="AI 응답 (Markdown)")
     sources: List[str] = Field(default=[], description="참조한 소스 목록")
     analysis_id: Optional[str] = Field(default=None, description="분석 결과 ID (Qdrant 저장용)")
+    data_source: Optional[str] = Field(default=None, description="데이터 출처 (sql_query, recent_logs, general_knowledge)")
+    data_source_detail: Optional[str] = Field(default=None, description="데이터 출처 상세 설명")
 
 # ==================== Endpoints ====================
 
@@ -118,10 +168,10 @@ async def chat(request: ChatRequest):
 
 **logs 테이블** (로그 저장소)
 - timestamp: DateTime (로그 발생 시간)
-- log_level: String (DEBUG, INFO, WARN, ERROR)
+- log_level: String (DEBUG, INFO, WARN, ERROR) ⚠️ 영문만 저장됨!
 - service: String (NPM/AM-04, NPM/AM-06 등)
 - template_id: UInt16 (Drain3 템플릿 ID)
-- raw_message: String (원본 로그 메시지)
+- raw_message: String (원본 로그 메시지) ⚠️ 영문 로그!
 
 **anomalies 테이블** (이상 탐지 결과)
 - timestamp: DateTime (탐지 시간)
@@ -136,10 +186,30 @@ async def chat(request: ChatRequest):
 - ai_response: String (AI 답변)
 - sources: Array(String) (참조 소스)
 
+### ⭐⭐⭐ 중요: 로그는 영문, 질문은 한국어 ⭐⭐⭐
+**로그 데이터는 모두 영문입니다!**
+- 사용자가 한국어로 질문해도, SQL의 WHERE 조건에는 **영어 키워드**를 사용해야 합니다.
+- 예: "노즐 에러" → raw_message ILIKE '%nozzle%' AND log_level = 'ERROR'
+- 예: "피더 경고" → raw_message ILIKE '%feeder%' AND log_level = 'WARN'
+- log_level 값: 'DEBUG', 'INFO', 'WARN', 'ERROR' (영문 대문자)
+- 한국어 키워드를 적절한 영어로 번역해서 검색하세요.
+
+### ClickHouse 전용 함수 (반드시 사용):
+**배열/집계 함수:**
+- groupArray(column): 배열로 그룹화 (중복 포함)
+- groupUniqArray(column): 중복 없는 배열로 그룹화 ⭐추천
+- COUNT(DISTINCT column): 중복 제거 카운트
+
+**시간 함수:**
+- now(), yesterday(), today()
+- toStartOfDay(timestamp), toStartOfHour(timestamp)
+- toDate(timestamp), toDateTime(string)
+
 예시 쿼리:
 - 빈도: SELECT service, COUNT(*) as cnt FROM logs WHERE log_level='ERROR' GROUP BY service
 - 시간대: SELECT toStartOfHour(timestamp) as hour, COUNT(*) FROM logs GROUP BY hour
-- 패턴: SELECT log_template, COUNT(*) FROM logs GROUP BY log_template ORDER BY COUNT(*) DESC
+- 패턴: SELECT template_id, COUNT(*) FROM logs GROUP BY template_id ORDER BY COUNT(*) DESC
+- 서비스 목록: SELECT template_id, groupUniqArray(service) FROM logs GROUP BY template_id
 """
 
         # LLM에게 SQL 생성 요청
@@ -150,17 +220,31 @@ async def chat(request: ChatRequest):
 위 테이블 구조를 바탕으로 사용자 질문을 분석하여 필요한 ClickHouse SQL 쿼리를 작성해줘.
 
 규칙:
-1. SELECT 문만 작성 (INSERT, DELETE, DROP 금지)
-2. 시간 필터는 최근 7일 기준 (DATE_SUB(NOW(), INTERVAL 7 DAY))
-3. LIMIT은 최대 100
-4. 결과를 정리하기 쉽게 ORDER BY 추가
+1. **단일 SELECT 쿼리만 작성** (여러 쿼리 금지, 세미콜론 여러 개 사용 금지)
+2. **주석 금지** (-- 주석 사용하지 말 것)
+3. SELECT 문만 작성 (INSERT, DELETE, DROP 금지)
+4. ClickHouse 문법 사용:
+   - 시간 함수: now(), yesterday(), today()
+   - 시간 연산: now() - INTERVAL 1 DAY (어제), now() - INTERVAL 7 DAY (최근 7일)
+   - 날짜 함수: toStartOfDay(), toStartOfHour(), toDate()
+5. LIMIT은 최대 100
+6. 결과를 정리하기 쉽게 ORDER BY 추가
+7. 여러 정보가 필요하면 JOIN을 사용하여 하나의 쿼리로 통합
+8. **⭐ 대소문자 무시 검색**: 키워드 검색 시 반드시 ILIKE 사용!
+   - ❌ raw_message LIKE '%NOZZLE%' (대소문자 구분됨)
+   - ✅ raw_message ILIKE '%nozzle%' (대소문자 무시, ClickHouse 최적화)
+
+ClickHouse 시간 필터 예시:
+- 어제: timestamp >= yesterday() AND timestamp < today()
+- 최근 24시간: timestamp >= now() - INTERVAL 24 HOUR
+- 최근 7일: timestamp >= now() - INTERVAL 7 DAY
 
 응답 형식:
 ```sql
 SELECT ...
 ```
 
-쿼리가 불가능하면 "NO_QUERY" 라고만 답변"""
+반드시 하나의 SELECT 쿼리만 작성할 것. 쿼리가 불가능하면 "NO_QUERY" 라고만 답변"""
 
         sql_response = await client.chat.completions.create(
             model=llm_factory.get_model_name(provider=request.llm_provider),
@@ -169,22 +253,30 @@ SELECT ...
             max_tokens=500
         )
 
-        sql_query = sql_response.choices[0].message.content.strip()
-        print(f"📝 생성된 쿼리:\n{sql_query}")
+        raw_sql_response = sql_response.choices[0].message.content.strip()
+        sql_query, is_valid_sql = extract_sql_query(raw_sql_response)
+        print(f"📝 생성된 쿼리 (원본):\n{raw_sql_response}")
+        print(f"📝 추출된 쿼리:\n{sql_query}")
+        print(f"📝 유효한 SELECT: {is_valid_sql}")
 
         process_steps.append({
             "step": "SQL_GENERATION",
             "duration_ms": round((time.time() - step1_start) * 1000),
             "generated_sql": sql_query,
+            "raw_response": raw_sql_response,
+            "is_valid_sql": is_valid_sql,
             "status": "success"
         })
 
-        # ==================== STEP 2: SQL 검증 ====================
+        # ==================== STEP 2: SQL 실행 ====================
         query_data = None
         sql_execution_success = False
         step2_start = time.time()
 
-        if sql_query != "NO_QUERY" and sql_query.upper().startswith("SELECT"):
+        print(f"🔍 Step 2: SQL 실행 - 쿼리: {sql_query[:80]}...")
+
+        if sql_query != "NO_QUERY" and is_valid_sql:
+            print(f"✅ SELECT 쿼리 확인됨, 보안 검사 진행")
             # 기본 보안: 위험한 명령어 체크
             dangerous_keywords = ["DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "TRUNCATE"]
             is_safe = not any(kw in sql_query.upper() for kw in dangerous_keywords)
@@ -193,9 +285,8 @@ SELECT ...
                 try:
                     print(f"✅ SQL 검증 통과, 실행 중...")
                     # ==================== STEP 3: ClickHouse 실행 ====================
-                    # SQL에서 코드블록 마크다운 제거
-                    clean_query = sql_query.replace("```sql", "").replace("```", "").strip()
-                    query_data = ch_client.execute(clean_query)
+                    # sql_query는 이미 extract_sql_query()에서 정리된 상태
+                    query_data = ch_client.execute(sql_query)
                     sql_execution_success = True
                     print(f"✅ 쿼리 실행 성공, {len(query_data) if query_data else 0}개 행 반환")
 
@@ -206,14 +297,87 @@ SELECT ...
                         "rows_returned": len(query_data) if query_data else 0
                     })
                 except Exception as e:
-                    print(f"❌ 쿼리 실행 실패: {e}")
-                    query_data = None
-                    process_steps.append({
-                        "step": "SQL_EXECUTION",
-                        "duration_ms": round((time.time() - step2_start) * 1000),
-                        "success": False,
-                        "error": str(e)
-                    })
+                    error_message = str(e)
+                    print(f"❌ 쿼리 실행 실패: {error_message}")
+
+                    # ==================== STEP 3.5: 오류 발생 시 LLM에게 재시도 요청 ====================
+                    print(f"🔄 Step 3.5: LLM에게 오류 수정 요청")
+                    step3_5_start = time.time()
+
+                    retry_prompt = f"""다음 SQL 쿼리가 ClickHouse에서 실행 중 오류가 발생했어. 오류를 수정해줘.
+
+실패한 쿼리:
+{sql_query}
+
+오류 메시지:
+{error_message}
+
+일반적인 ClickHouse 오류 해결 방법:
+1. GROUP BY 문제: SELECT에 있는 모든 non-aggregate 컬럼은 GROUP BY에 포함되어야 함
+2. LEFT JOIN NULL 문제: JOIN된 테이블의 컬럼을 GROUP BY에 넣지 말고, MAX() 등 집계 함수 사용
+3. 배열 함수: groupUniqArray() 사용 시 너무 많은 데이터는 제한 필요
+4. LIKE 검색: 대소문자 구분함, 필요시 lower() 사용
+5. 함수 오류:
+   - ❌ toIntervalDay(N) → ✅ INTERVAL N DAY
+   - ❌ greatest(a, b) → ✅ if(a > b, a, b) 또는 max(a, b)
+   - ❌ least(a, b) → ✅ if(a < b, a, b) 또는 min(a, b)
+6. 서브쿼리 단순화: 너무 복잡한 JOIN은 단순한 쿼리로 분리
+
+수정된 쿼리만 반환 (코드블록 없이 순수 SQL만):
+SELECT ...
+
+추가 설명 없이 쿼리만 반환할 것."""
+
+                    try:
+                        retry_response = await client.chat.completions.create(
+                            model=llm_factory.get_model_name(provider=request.llm_provider),
+                            messages=[{"role": "user", "content": retry_prompt}],
+                            temperature=0.0,
+                            max_tokens=500
+                        )
+
+                        raw_fixed_response = retry_response.choices[0].message.content.strip()
+                        fixed_query, is_valid_fixed = extract_sql_query(raw_fixed_response)
+                        print(f"🔧 수정된 쿼리:\n{fixed_query}")
+                        print(f"🔧 유효한 SELECT: {is_valid_fixed}")
+
+                        # 수정된 쿼리 재실행
+                        try:
+                            query_data = ch_client.execute(fixed_query)
+                            sql_execution_success = True
+                            print(f"✅ 재시도 성공! {len(query_data) if query_data else 0}개 행 반환")
+
+                            process_steps.append({
+                                "step": "SQL_RETRY_AFTER_ERROR",
+                                "duration_ms": round((time.time() - step3_5_start) * 1000),
+                                "original_error": error_message,
+                                "fixed_sql": fixed_query,
+                                "success": True,
+                                "rows_returned": len(query_data) if query_data else 0
+                            })
+                        except Exception as retry_error:
+                            print(f"❌ 재시도도 실패: {retry_error}")
+                            query_data = None
+                            process_steps.append({
+                                "step": "SQL_RETRY_AFTER_ERROR",
+                                "duration_ms": round((time.time() - step3_5_start) * 1000),
+                                "original_error": error_message,
+                                "fixed_sql": fixed_query,
+                                "retry_error": str(retry_error),
+                                "success": False
+                            })
+                    except Exception as llm_error:
+                        print(f"❌ LLM 재시도 요청 실패: {llm_error}")
+                        query_data = None
+
+                    # 최종 실패 기록 (재시도 실패 시)
+                    if not sql_execution_success:
+                        process_steps.append({
+                            "step": "SQL_EXECUTION",
+                            "duration_ms": round((time.time() - step2_start) * 1000),
+                            "success": False,
+                            "error": error_message
+                        })
             else:
                 print(f"⚠️ 위험한 SQL 감지, 실행 방지")
                 process_steps.append({
@@ -223,23 +387,65 @@ SELECT ...
                     "reason": "Dangerous keywords detected"
                 })
                 query_data = None
+        else:
+            # NO_QUERY이거나 유효하지 않은 SQL인 경우
+            print(f"⚠️ SQL 실행 불가: sql_query={sql_query[:50] if sql_query != 'NO_QUERY' else 'NO_QUERY'}")
+            print(f"   - NO_QUERY 여부: {sql_query == 'NO_QUERY'}")
+            print(f"   - 유효한 SELECT: {is_valid_sql}")
+            query_data = None
 
         # ==================== STEP 4: 결과 분석 ====================
         context = f"사용자 질문: {request.message}\n\n"
 
-        if query_data:
-            # 데이터를 텍스트로 포맷
-            data_text = "쿼리 결과:\n"
-            for i, row in enumerate(query_data[:20]):  # 최대 20행만 표시
-                data_text += f"{i+1}. {row}\n"
-            context += data_text
+        # ⭐ 데이터 출처 추적 변수
+        data_source = "unknown"  # sql_query, recent_logs, general_knowledge
+        data_source_detail = ""
+        query_rows_count = len(query_data) if query_data else 0
+
+        # SQL 실행 오류 메시지 추출
+        sql_error_message = None
+        for step in process_steps:
+            if step.get("step") == "SQL_EXECUTION" and not step.get("success"):
+                sql_error_message = step.get("error")
+                break
+            if step.get("step") == "SQL_RETRY_AFTER_ERROR" and not step.get("success"):
+                sql_error_message = step.get("retry_error")
+                break
+
+        # ⭐ 핵심 수정: sql_execution_success 플래그로 판단 (빈 리스트 []도 성공으로 처리)
+        if sql_execution_success:
+            if query_data:
+                # SQL 실행 성공 + 데이터 있음 → 데이터를 텍스트로 포맷
+                data_source = "sql_query"
+                data_source_detail = f"SQL 쿼리 실행 결과 ({query_rows_count}개 행)"
+                data_text = f"📊 [데이터 출처: SQL 쿼리 결과 - {query_rows_count}개 행]\n\n쿼리 결과:\n"
+                for i, row in enumerate(query_data[:20]):  # 최대 20행만 표시
+                    data_text += f"{i+1}. {row}\n"
+                context += data_text
+            else:
+                # SQL 실행 성공 + 데이터 없음 (0행 반환) → 일반 지식 기반 답변
+                data_source = "general_knowledge"
+                data_source_detail = f"SQL 쿼리 성공했으나 조건에 맞는 데이터 없음 (0개 행). 일반 지식 기반 답변."
+                context += f"⚠️ [데이터 출처: 일반 지식 기반]\n\n"
+                context += f"SQL 쿼리가 성공적으로 실행되었지만 조건에 맞는 데이터가 0건입니다.\n"
+                context += f"실행된 쿼리: {sql_query}\n"
+                context += f"\n→ 해당 키워드/조건에 맞는 로그가 수집되지 않았습니다.\n"
+                context += f"→ 아래 답변은 실제 데이터가 아닌 일반적인 도메인 지식을 기반으로 합니다.\n"
         elif sql_query != "NO_QUERY":
-            # SQL은 생성되었는데 실행 실패 → 오류 메시지만 표시
-            context += f"⚠️ SQL 쿼리 실행 실패. 자세한 데이터 없이 질문에 답변할 수 없습니다.\n"
+            # SQL은 생성되었는데 실행 실패 → 최근 로그 또는 일반 지식 기반
+            data_source = "recent_logs"
+            data_source_detail = f"SQL 실행 실패로 최근 로그 기반 분석"
+            context += f"⚠️ [데이터 출처: 최근 로그 + 일반 지식]\n\n"
+            context += f"SQL 쿼리 실행 실패로 최근 로그를 참조합니다.\n"
             context += f"생성된 쿼리: {sql_query}\n"
+            if sql_error_message:
+                context += f"오류: {sql_error_message[:200]}...\n\n"
         else:
             # SQL을 생성할 수 없는 경우 → 최근 로그 사용
-            context += "SQL을 생성할 수 없어 최근 로그를 기반으로 분석합니다.\n"
+            data_source = "recent_logs"
+            data_source_detail = "SQL 생성 불가로 최근 로그 기반 분석"
+            context += f"ℹ️ [데이터 출처: 최근 로그]\n\n"
+            context += "이 질문은 SQL 쿼리로 변환할 수 없어 최근 로그를 기반으로 분석합니다.\n"
             try:
                 log_query = "SELECT timestamp, log_level, service, raw_message FROM logs ORDER BY timestamp DESC LIMIT 10"
                 log_result = ch_client.execute(log_query)
@@ -263,6 +469,7 @@ SELECT ...
 
         # ==================== STEP 5: LLM이 최종 답변 생성 ====================
         print(f"🤖 Step 5: 최종 답변 생성 중...")
+        print(f"📌 데이터 출처: {data_source} - {data_source_detail}")
 
         # 대화 히스토리 포함
         messages = [{"role": "system", "content": system_persona}]
@@ -271,13 +478,35 @@ SELECT ...
             for msg in request.history[-5:]:  # 최근 5개 메시지만 포함
                 messages.append({"role": msg.role, "content": msg.content})
 
-        # 쿼리 결과 또는 최근 로그를 바탕으로 최종 분석
-        final_prompt = f"""{context}
+        # ⭐ 데이터 출처에 따른 LLM 프롬프트 분기
+        if data_source == "sql_query":
+            # SQL 결과 기반 → 데이터 기반 분석
+            final_prompt = f"""{context}
 
-위 정보를 바탕으로 사용자 질문에 명확하고 정확하게 답변해줘.
-- 통계나 빈도 데이터가 있으면 구체적인 숫자로 설명
+위 SQL 쿼리 결과 데이터를 기반으로 사용자 질문에 답변해줘.
+- 실제 데이터 기반이므로 구체적인 숫자와 통계로 설명
 - 패턴이나 트렌드가 있으면 분석 결과 제시
-- 명확한 해석을 제공"""
+- 답변 시작에 "📊 **[SQL 쿼리 결과 기반 분석]**" 표시"""
+        elif data_source == "general_knowledge":
+            # 데이터 없음 → 일반 지식 기반 답변 (명확히 고지)
+            final_prompt = f"""{context}
+
+⚠️ 중요: SQL 쿼리는 성공했지만 조건에 맞는 데이터가 없습니다 (0개 행).
+실제 로그 데이터가 아닌 일반적인 도메인 지식을 기반으로 답변해야 합니다.
+
+답변 규칙:
+1. 반드시 답변 시작에 "⚠️ **[일반 지식 기반 답변]** - 조건에 맞는 로그 데이터가 없어 일반적인 지식으로 답변합니다." 표시
+2. 추측성 내용은 "~로 추정됩니다", "~일 가능성이 있습니다"로 표현
+3. 가능하다면 데이터가 없는 이유(로그 미수집, 키워드 불일치 등) 설명
+4. 확인이 필요한 사항 제안"""
+        else:
+            # 최근 로그 기반
+            final_prompt = f"""{context}
+
+위 최근 로그를 참고하여 사용자 질문에 답변해줘.
+- SQL 쿼리가 실패하거나 생성되지 않아 최근 로그를 참조합니다
+- 답변 시작에 "📋 **[최근 로그 기반 분석]**" 표시
+- 가능한 범위 내에서 분석 제공"""
 
         messages.append({"role": "user", "content": final_prompt})
 
@@ -353,7 +582,9 @@ SELECT ...
         return ChatResponse(
             response=ai_response,
             sources=sources,
-            analysis_id=analysis_id
+            analysis_id=analysis_id,
+            data_source=data_source,
+            data_source_detail=data_source_detail
         )
 
     except Exception as e:

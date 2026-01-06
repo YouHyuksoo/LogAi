@@ -968,105 +968,7 @@ export default function HistoryPage() {
                 </div>
               )}
 
-              {/* 분석 과정 로그 */}
-              {selectedItem.process_log && (
-                <div>
-                  <h3
-                    className={cn(
-                      "text-sm font-semibold mb-2 flex items-center gap-2",
-                      theme === "dark" ? "text-gray-300" : "text-gray-700"
-                    )}
-                  >
-                    <Clock className="w-4 h-4" />
-                    분석 과정 상세 로그
-                  </h3>
-                  <div
-                    className={cn(
-                      "space-y-2 max-h-[200px] overflow-y-auto",
-                      theme === "dark" ? "bg-gray-800" : "bg-gray-100"
-                    )}
-                  >
-                    {typeof selectedItem.process_log === "string" ? (
-                      (() => {
-                        try {
-                          const logs = JSON.parse(selectedItem.process_log);
-                          return (logs as Array<any>).map((log, idx) => (
-                            <div
-                              key={idx}
-                              className={cn(
-                                "p-2 rounded text-xs border",
-                                theme === "dark"
-                                  ? "bg-gray-700 border-gray-600 text-gray-300"
-                                  : "bg-gray-50 border-gray-300 text-gray-700"
-                              )}
-                            >
-                              <div className="font-semibold flex justify-between">
-                                <span>{log.step || "UNKNOWN"}</span>
-                                {log.duration_ms && (
-                                  <span className="text-gray-500">
-                                    {log.duration_ms}ms
-                                  </span>
-                                )}
-                              </div>
-                              {log.status && (
-                                <div>
-                                  Status: {log.status}
-                                </div>
-                              )}
-                              {log.success !== undefined && (
-                                <div>
-                                  Result:{" "}
-                                  <span
-                                    className={
-                                      log.success
-                                        ? "text-green-400"
-                                        : "text-red-400"
-                                    }
-                                  >
-                                    {log.success ? "✅ Success" : "❌ Failed"}
-                                  </span>
-                                </div>
-                              )}
-                              {log.rows_returned !== undefined && (
-                                <div>Rows: {log.rows_returned}</div>
-                              )}
-                              {log.error && (
-                                <div className="text-red-400">
-                                  Error: {log.error}
-                                </div>
-                              )}
-                            </div>
-                          ));
-                        } catch (e) {
-                          return (
-                            <div
-                              className={cn(
-                                "p-2 rounded text-xs",
-                                theme === "dark"
-                                  ? "bg-gray-700 text-gray-400"
-                                  : "bg-gray-50 text-gray-600"
-                              )}
-                            >
-                              (로그 파싱 실패)
-                            </div>
-                          );
-                        }
-                      })()
-                    ) : (
-                      <div
-                        className={cn(
-                          "p-2 rounded text-xs",
-                          theme === "dark"
-                            ? "bg-gray-700 text-gray-400"
-                            : "bg-gray-50 text-gray-600"
-                        )}
-                      >
-                        로그 데이터 없음
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
+              {/* 분석 과정 상세 로그 - 중복 제거로 삭제 */}
 
               {/* 참조 소스 */}
               {selectedItem.sources && selectedItem.sources.length > 0 && (
@@ -1098,30 +1000,7 @@ export default function HistoryPage() {
                 </div>
               )}
 
-              {/* 로그 컨텍스트 */}
-              {selectedItem.log_context && (
-                <div>
-                  <h3
-                    className={cn(
-                      "text-sm font-semibold mb-2 flex items-center gap-2",
-                      theme === "dark" ? "text-gray-300" : "text-gray-700"
-                    )}
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    참조한 로그 컨텍스트
-                  </h3>
-                  <pre
-                    className={cn(
-                      "p-3 rounded-lg text-xs overflow-x-auto max-h-[200px] overflow-y-auto",
-                      theme === "dark"
-                        ? "bg-gray-800 text-gray-300"
-                        : "bg-gray-100 text-gray-700"
-                    )}
-                  >
-                    {selectedItem.log_context}
-                  </pre>
-                </div>
-              )}
+              {/* 로그 컨텍스트 - LLM 프롬프트와 중복으로 삭제 */}
             </div>
           ) : (
             <div
