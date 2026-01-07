@@ -194,8 +194,7 @@ export default function ChatPage() {
 
   /**
    * 동적 제안 질문 로드 (최근 로그 기반)
-   * - 페이지 로드 시 실행
-   * - 새로고침 버튼 클릭 시에도 호출 가능
+   * - 새로고침 버튼 클릭 시에만 호출 (자동 로드 제거)
    * - LLM을 통해 최근 로그에서 추출한 키워드 기반 제안 생성
    */
   const loadDynamicSuggestions = useCallback(async () => {
@@ -212,12 +211,6 @@ export default function ChatPage() {
       setSuggestionsLoading(false);
     }
   }, []);
-
-  useEffect(() => {
-    if (isClient) {
-      loadDynamicSuggestions();
-    }
-  }, [isClient, loadDynamicSuggestions]);
 
   /**
    * 새 메시지 추가 시 자동 스크롤
@@ -909,14 +902,14 @@ export default function ChatPage() {
                 <div className="flex items-center justify-between gap-2 px-3 py-2 bg-gray-800 border-b border-gray-700">
                   <div className="flex items-center gap-2">
                     <Lightbulb className="w-4 h-4 text-yellow-400 flex-shrink-0" />
-                    <p className="text-xs text-gray-400">제안 질문 (최근 로그 기반)</p>
+                    <p className="text-xs text-gray-400">제안 질문 (새로고침으로 최신 로그 기반 제안 생성)</p>
                   </div>
                   <button
                     type="button"
                     onClick={() => loadDynamicSuggestions()}
                     disabled={suggestionsLoading}
                     className="flex items-center gap-1.5 px-2 py-1 text-xs text-gray-400 hover:text-primary hover:bg-gray-700 rounded transition-colors disabled:opacity-50"
-                    title="새로운 제안 생성"
+                    title="최근 로그 기반 새로운 제안 생성 (LLM 호출)"
                   >
                     <RefreshCw className={cn("w-3.5 h-3.5", suggestionsLoading && "animate-spin")} />
                     새로고침
