@@ -15,7 +15,7 @@ echo       LogAi Docker 명령어 모음
 echo ============================================
 echo.
 echo  [시작/중지]
-echo   1. 전체 시작 (프로덕션)
+echo   1. 전체 시작 - 프로덕션
 echo   2. 전체 중지
 echo   3. 전체 재시작
 echo.
@@ -23,7 +23,7 @@ echo  [개별 서비스]
 echo   4. Backend 재시작
 echo   5. Consumer 재시작
 echo   6. Frontend 재시작
-echo   7. Backend + Consumer 재시작 (설정 변경 후)
+echo   7. Backend + Consumer 재시작 - 설정 변경 후
 echo.
 echo  [로그 확인]
 echo   10. Backend 로그
@@ -42,10 +42,10 @@ echo   31. Frontend 리빌드 후 시작
 echo   32. 전체 리빌드 후 시작
 echo.
 echo  [데이터 관리]
-echo   40. 전체 중지 + 볼륨 삭제 (데이터 초기화)
+echo   40. 전체 중지 + 볼륨 삭제 - 데이터 초기화
 echo   41. 사용하지 않는 이미지 정리
 echo.
-echo  [AI 엔진 (GPU 필요)]
+echo  [AI 엔진 - GPU 필요]
 echo   50. AI 엔진 포함 전체 시작
 echo   51. AI 엔진만 시작
 echo   52. AI 엔진 중지
@@ -127,29 +127,29 @@ docker-compose -f docker-compose.prod.yml restart frontend
 goto PAUSE_END
 
 :RESTART_BACKEND_CONSUMER
-echo [재시작] Backend + Consumer 재시작 (.env 설정 반영)...
+echo [재시작] Backend + Consumer 재시작 - .env 설정 반영...
 docker-compose -f docker-compose.prod.yml restart backend consumer
 goto PAUSE_END
 
 :: ==================== 로그 확인 ====================
 
 :LOG_BACKEND
-echo [로그] Backend 로그 (Ctrl+C로 종료)...
+echo [로그] Backend 로그 - Ctrl+C로 종료...
 docker-compose -f docker-compose.prod.yml logs -f backend
 goto PAUSE_END
 
 :LOG_CONSUMER
-echo [로그] Consumer 로그 (Ctrl+C로 종료)...
+echo [로그] Consumer 로그 - Ctrl+C로 종료...
 docker-compose -f docker-compose.prod.yml logs -f consumer
 goto PAUSE_END
 
 :LOG_FRONTEND
-echo [로그] Frontend 로그 (Ctrl+C로 종료)...
+echo [로그] Frontend 로그 - Ctrl+C로 종료...
 docker-compose -f docker-compose.prod.yml logs -f frontend
 goto PAUSE_END
 
 :LOG_ALL
-echo [로그] 전체 로그 (Ctrl+C로 종료)...
+echo [로그] 전체 로그 - Ctrl+C로 종료...
 docker-compose -f docker-compose.prod.yml logs -f
 goto PAUSE_END
 
@@ -209,12 +209,12 @@ goto PAUSE_END
 :: ==================== AI 엔진 ====================
 
 :START_WITH_AI
-echo [시작] AI 엔진 포함 전체 시작 (GPU 필요)...
+echo [시작] AI 엔진 포함 전체 시작 - GPU 필요...
 docker-compose -f docker-compose.prod.yml -f docker-compose.ai.yml up -d
 goto PAUSE_END
 
 :START_AI_ONLY
-echo [시작] AI 엔진만 시작 (GPU 필요)...
+echo [시작] AI 엔진만 시작 - GPU 필요...
 docker-compose -f docker-compose.ai.yml up -d
 goto PAUSE_END
 
